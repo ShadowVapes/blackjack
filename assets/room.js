@@ -63,15 +63,13 @@
         bjPay: "3:2",
         surrender: "late",
         doubleRule: "any",
+        doubleCustom: "",
         DAS: true,
         maxHands: 4,
-        splitA: "one",
-      },
+        splitA: "one" },
       player: [],
       dealer: [],
-      showHole: false,
-      seen: [],
-    };
+      seen: [] };
   }
 
   let state = defaultState();
@@ -116,7 +114,6 @@
 
   function mergePartial(partial, source){
     if(partial.rules) state.rules = { ...state.rules, ...partial.rules };
-    if(typeof partial.showHole === "boolean") state.showHole = partial.showHole;
 
     if(source === "host" && partial.player) state.player = partial.player;
     if(source === "dealer" && partial.dealer) state.dealer = partial.dealer;
@@ -167,11 +164,11 @@
 
           // Send initial patches
           if(state.role === "host"){
-            rtBroadcast({ player: state.player, rules: state.rules, seen: state.seen, showHole: state.showHole }, "host");
+            rtBroadcast({ player: state.player, rules: state.rules, seen: state.seen }, "host");
           } else if(state.role === "dealer"){
-            rtBroadcast({ dealer: state.dealer, showHole: state.showHole }, "dealer");
+            rtBroadcast({ dealer: state.dealer }, "dealer");
           } else {
-            rtBroadcast({ rules: state.rules, seen: state.seen, showHole: state.showHole }, "any");
+            rtBroadcast({ rules: state.rules, seen: state.seen }, "any");
           }
         }
       });
@@ -326,7 +323,7 @@ function addCardTo(listName, card){
     renderAll();
     if(state.mode === "multi" && rtReady){
       if(listName === "player") rtBroadcast({ player: state.player }, "host");
-      else if(listName === "dealer") rtBroadcast({ dealer: state.dealer, showHole: state.showHole }, "dealer");
+      else if(listName === "dealer") rtBroadcast({ dealer: state.dealer }, "dealer");
       else if(listName === "seen") rtBroadcast({ seen: state.seen }, "any");
     }
   }
@@ -336,7 +333,7 @@ function addCardTo(listName, card){
     renderAll();
     if(state.mode === "multi" && rtReady){
       if(listName === "player") rtBroadcast({ player: state.player }, "host");
-      else if(listName === "dealer") rtBroadcast({ dealer: state.dealer, showHole: state.showHole }, "dealer");
+      else if(listName === "dealer") rtBroadcast({ dealer: state.dealer }, "dealer");
       else if(listName === "seen") rtBroadcast({ seen: state.seen }, "any");
     }
   }
@@ -352,8 +349,7 @@ function addCardTo(listName, card){
 
   function compute(){
     const decks = parseInt(state.rules.decks,10) || 6;
-const dealerVisible = state.showHole ? state.dealer : state.dealer.slice(0,1);
-const dealt = [...state.seen, ...state.player, ...dealerVisible];
+const dealt = [...state.seen, ...state.player, ...state.dealer];
 const rc = window.BJCount.runningCount(dealt);
 const rem = window.BJCount.remainingFromSeen(decks, dealt.length);
 const tc = window.BJCount.trueCount(rc, rem.remainingDecks);
@@ -366,7 +362,7 @@ const tc = window.BJCount.trueCount(rc, rem.remainingDecks);
     const pTotal = window.BJStrategy.handTotal(state.player);
     $("playerTotal").textContent = `Total: ${pTotal.total} (${pTotal.soft ? "soft" : "hard"})`;
     const dUp = state.dealer[0] ? `${state.dealer[0].rank}${state.dealer[0].suit}` : "—";
-    $("dealerTotal").textContent = `Upcard: ${dUp}` + (state.showHole && state.dealer[1] ? ` • Hole: ${state.dealer[1].rank}${state.dealer[1].suit}` : "");
+    $("dealerTotal").textContent = `Dealer up: ${dUp} • lapok: ${state.dealer.length}`;
 
     const devUl = $("devList");
     devUl.innerHTML = "";
@@ -385,6 +381,7 @@ const tc = window.BJCount.trueCount(rc, rem.remainingDecks);
       bjPay: state.rules.bjPay,
       surrender: state.rules.surrender,
       doubleRule: state.rules.doubleRule,
+      doubleCustom: state.rules.doubleCustom || "",
       DAS: !!state.rules.DAS,
       maxHands: parseInt(state.rules.maxHands,10) || 4,
       splitA: state.rules.splitA
@@ -414,16 +411,15 @@ const tc = window.BJCount.trueCount(rc, rem.remainingDecks);
     seenWrap.innerHTML = "";
     state.seen.forEach((c, idx)=>{
       seenWrap.appendChild(cardChip(c, ()=>removeCardFrom("seen", idx), true));
-    });
-
-    $("showHole").checked = !!state.showHole;
-
-    // rules UI
+    });    // rules UI
     $("ruleDecks").value = String(state.rules.decks);
     $("ruleDealer17").value = state.rules.dealer17;
     $("ruleBjPay").value = state.rules.bjPay;
     $("ruleSurrender").value = state.rules.surrender;
     $("ruleDouble").value = state.rules.doubleRule;
+    if($("ruleDoubleCustom")) $("ruleDoubleCustom").value = state.rules.doubleCustom || "";
+    if($("doubleCustomWrap")) $("doubleCustomWrap").style.display = (state.rules.doubleRule === "custom") ? "block" : "none";
+
     $("ruleDAS").value = state.rules.DAS ? "on" : "off";
     $("ruleMaxHands").value = String(state.rules.maxHands);
     $("ruleSplitA").value = state.rules.splitA;
@@ -461,7 +457,6 @@ const tc = window.BJCount.trueCount(rc, rem.remainingDecks);
       rules: state.rules,
       player: state.player,
       dealer: state.dealer,
-      showHole: state.showHole,
       seen: state.seen
     };
     return JSON.stringify(pack);
@@ -471,12 +466,15 @@ const tc = window.BJCount.trueCount(rc, rem.remainingDecks);
     if(obj.rules) state.rules = { ...state.rules, ...obj.rules };
     if(Array.isArray(obj.player)) state.player = obj.player;
     if(Array.isArray(obj.dealer)) state.dealer = obj.dealer;
-    if(typeof obj.showHole === "boolean") state.showHole = obj.showHole;
     if(Array.isArray(obj.seen)) state.seen = obj.seen;
     renderAll();
   }
 
+  let __bj_inited = false;
+
   function init(){
+    if(__bj_inited) return;
+    __bj_inited = true;
     loadPersist();
 
     const h = parseHash();
@@ -500,10 +498,6 @@ const tc = window.BJCount.trueCount(rc, rem.remainingDecks);
       if(!canEditDealer()) return showToast("Dealer locked");
       const card = pickToCard("dealer", pick);
       if(card){
-        if(state.dealer.length >= (state.showHole ? 2 : 1)){
-          showToast("Dealer lap limit (kapcsold be a Hole-t)");
-          return;
-        }
         addCardTo("dealer", card);
       }
     });
@@ -522,8 +516,7 @@ const tc = window.BJCount.trueCount(rc, rem.remainingDecks);
     showToast("Csak a HOST indíthatja a következő kört");
     return;
   }
-  const dealerVisible = state.showHole ? state.dealer : state.dealer.slice(0,1);
-  const toMove = [...state.player, ...dealerVisible];
+  const toMove = [...state.player, ...state.dealer];
   if(toMove.length === 0){
     showToast("Nincs mit menteni (adj meg lapokat)");
     return;
@@ -532,7 +525,6 @@ const tc = window.BJCount.trueCount(rc, rem.remainingDecks);
 
   state.player = [];
   state.dealer = [];
-  state.showHole = false;
 
   persist();
   renderAll();
@@ -540,7 +532,7 @@ const tc = window.BJCount.trueCount(rc, rem.remainingDecks);
   if(state.mode === "multi" && rtReady){
     rtBroadcast({ seen: state.seen }, "any");
     rtBroadcast({ player: state.player }, "host");
-    rtBroadcast({ dealer: state.dealer, showHole:false }, "dealer");
+    rtBroadcast({ dealer: state.dealer }, "dealer");
   }
   showToast("Következő kör ✓ (kör mentve a shoe-ba)");
 });
@@ -550,17 +542,7 @@ const tc = window.BJCount.trueCount(rc, rem.remainingDecks);
       if(state.mode === "multi" && rtReady) rtBroadcast({ seen: [] }, "any");
       showToast("Cipő reset");
     });
-
-    $("showHole").addEventListener("change", (e)=>{
-      state.showHole = !!e.target.checked;
-      if(!state.showHole && state.dealer.length > 1){
-        state.dealer = state.dealer.slice(0,1);
-      }
-      renderAll();
-      if(state.mode === "multi" && rtReady) rtBroadcast({ showHole: state.showHole, dealer: state.dealer }, "dealer");
-    });
-
-    $("btnAuto").addEventListener("click", applyAuto);
+$("btnAuto").addEventListener("click", applyAuto);
     $("btnExplain").addEventListener("click", ()=>{
       const { rec, tc } = compute();
       openModal("Miért ez?", `${rec.title}\n\n${rec.detail}\n\nTC: ${tc.toFixed(2)}\n\nMegjegyzés: basic strategy + TC deviációk.`);
@@ -568,6 +550,25 @@ const tc = window.BJCount.trueCount(rc, rem.remainingDecks);
 
     ["ruleDecks","ruleDealer17","ruleBjPay","ruleSurrender","ruleDouble","ruleDAS","ruleMaxHands","ruleSplitA"]
       .forEach(id => $(id).addEventListener("change", applyRulesFromUI));
+
+    // Double custom UI
+    const syncDoubleCustomUI = ()=>{
+      const mode = $("ruleDouble").value;
+      const wrap = $("doubleCustomWrap");
+      if(wrap) wrap.style.display = (mode === "custom") ? "block" : "none";
+    };
+    syncDoubleCustomUI();
+    $("ruleDouble").addEventListener("change", syncDoubleCustomUI);
+    const dci = $("ruleDoubleCustom");
+    if(dci){
+      dci.addEventListener("input", ()=>{
+        state.rules.doubleCustom = dci.value;
+        persist();
+        renderAll();
+        if(state.mode === "multi" && rtReady) rtBroadcast({ rules: state.rules }, "any");
+      });
+    }
+
 
     function renderLinks(){
       const baseUrl = location.href.split("#")[0].replace(/room\.html.*$/,"room.html");
@@ -604,13 +605,13 @@ const tc = window.BJCount.trueCount(rc, rem.remainingDecks);
 
     $("btnCopyHost").addEventListener("click", async ()=>{
       const txt = $("hostLink").textContent;
-      await navigator.clipboard.writeText(txt);
-      showToast("Host link másolva");
+      try{ await navigator.clipboard.writeText(txt); showToast("Host link másolva"); }
+      catch(_e){ showToast("Másolás nem engedett (nyisd HTTPS-en vagy localhoston)"); }
     });
     $("btnCopyDealer").addEventListener("click", async ()=>{
       const txt = $("dealerLink").textContent;
-      await navigator.clipboard.writeText(txt);
-      showToast("Dealer link másolva");
+      try{ await navigator.clipboard.writeText(txt); showToast("Dealer link másolva"); }
+      catch(_e){ showToast("Másolás nem engedett (nyisd HTTPS-en vagy localhoston)"); }
     });
 
     $("btnCopyState").addEventListener("click", async ()=>{
@@ -647,6 +648,5 @@ const tc = window.BJCount.trueCount(rc, rem.remainingDecks);
     renderLinks();
     renderAll();
   }
-
-  window.addEventListener("load", init);
+  document.addEventListener("DOMContentLoaded", init);
 })();
