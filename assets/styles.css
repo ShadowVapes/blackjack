@@ -1,0 +1,186 @@
+:root{
+  --bg:#0b0b0f;
+  --card:#141422;
+  --muted:rgba(255,255,255,.72);
+  --muted2:rgba(255,255,255,.55);
+  --line:rgba(255,255,255,.10);
+  --accent:#7c5cff;
+  --good:#2cd97b;
+  --bad:#ff4d4d;
+  --warn:#ffd36b;
+  --shadow:0 14px 40px rgba(0,0,0,.35);
+  --radius:18px;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:#fff}
+a{color:inherit;text-decoration:none}
+.app-shell{min-height:100vh;display:flex;flex-direction:column}
+.topbar{
+  display:flex;align-items:center;justify-content:space-between;
+  gap:14px;padding:14px 18px;border-bottom:1px solid var(--line);
+  background: rgba(20,20,34,.7);
+  backdrop-filter: blur(10px);
+  position:sticky;top:0;z-index:20;
+}
+.brand{display:flex;align-items:center;gap:12px}
+.logo{
+  width:38px;height:38px;border-radius:12px;
+  display:grid;place-items:center;
+  background: linear-gradient(135deg, rgba(124,92,255,.35), rgba(44,217,123,.20));
+  border:1px solid rgba(255,255,255,.12);
+  box-shadow: var(--shadow);
+  font-weight:800;
+}
+.title{font-weight:800;letter-spacing:.2px}
+.subtitle{font-size:12px;color:var(--muted2);margin-top:2px}
+.top-actions{display:flex;gap:10px;align-items:center}
+
+.container{width:min(1100px, 92vw);margin:16px auto 22px;display:grid;gap:16px}
+.card{
+  background: var(--card);
+  border:1px solid var(--line);
+  border-radius: var(--radius);
+  padding:16px;
+  box-shadow: var(--shadow);
+}
+.h2{margin:0 0 4px}
+h2{margin:0 0 10px}
+h3{margin:0 0 8px}
+.muted{color:var(--muted)}
+.small{font-size:12px}
+.mono{font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
+.area{width:100%;min-height:120px;margin-top:10px;border-radius:14px;border:1px solid var(--line);background:rgba(0,0,0,.25);color:#fff;padding:10px}
+.sep{border:0;border-top:1px solid var(--line);margin:14px 0}
+
+.grid2{display:grid;grid-template-columns: 1fr 1fr;gap:14px}
+.grid3{display:grid;grid-template-columns: 1.1fr 1.1fr 1fr;gap:14px}
+@media (max-width: 980px){
+  .grid3{grid-template-columns:1fr; }
+  .grid2{grid-template-columns:1fr;}
+}
+
+.mini{
+  background: rgba(0,0,0,.18);
+  border:1px solid var(--line);
+  border-radius: 16px;
+  padding:12px;
+}
+
+.field{display:grid;gap:6px;margin:10px 0}
+.field label{font-size:12px;color:var(--muted2)}
+input, select{
+  height:40px;border-radius:12px;
+  border:1px solid rgba(255,255,255,.12);
+  background: rgba(0,0,0,.25);
+  color:#fff;
+  padding:0 10px;
+  outline:none;
+}
+select{padding-right:28px}
+input:focus, select:focus{border-color:rgba(124,92,255,.55);box-shadow:0 0 0 3px rgba(124,92,255,.18)}
+
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.row-between{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.pill{
+  padding:7px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.12);
+  background: rgba(0,0,0,.22);
+  font-size:12px;color:var(--muted);
+}
+.pill.small{padding:5px 8px;font-size:11px}
+
+.btn{
+  height:40px;padding:0 12px;border-radius:12px;border:1px solid rgba(255,255,255,.12);
+  background: rgba(124,92,255,.20);
+  color:#fff;cursor:pointer;font-weight:700;
+}
+.btn:hover{background: rgba(124,92,255,.26)}
+.btn.ghost{background: rgba(255,255,255,.06)}
+.btn.ghost:hover{background: rgba(255,255,255,.10)}
+.btn.small{height:32px;border-radius:10px;font-size:12px;padding:0 10px;font-weight:700}
+
+.check{display:flex;gap:10px;align-items:center;font-size:12px;color:var(--muted)}
+.check input{accent-color: var(--accent); width:16px; height:16px}
+
+.hand{display:flex;gap:8px;flex-wrap:wrap;min-height:46px}
+.cardChip{
+  display:flex;gap:8px;align-items:center;
+  background: rgba(0,0,0,.26);
+  border:1px solid rgba(255,255,255,.12);
+  border-radius: 999px;
+  padding:8px 10px;
+}
+.cardChip .rank{font-weight:900}
+.cardChip .suit{opacity:.9}
+.cardChip button{
+  height:22px;min-width:22px;border-radius:10px;border:1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.06); color:#fff; cursor:pointer;
+}
+.cardChip button:hover{background: rgba(255,255,255,.10)}
+
+.picker{
+  display:grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap:8px;
+  margin-top:10px;
+}
+@media (max-width: 520px){
+  .picker{grid-template-columns: repeat(5, minmax(0, 1fr));}
+}
+.pickBtn{
+  height:36px;border-radius:12px;border:1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.06);
+  color:#fff;cursor:pointer;font-weight:800;
+}
+.pickBtn:hover{background: rgba(255,255,255,.10)}
+.pickBtn.suit{font-weight:900}
+.pickBtn.red{color:#ff6d6d}
+.pickBtn.green{color:#6dffb1}
+
+.kpi{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0}
+.kpiTitle{font-size:11px;color:var(--muted2)}
+.kpiVal{font-size:20px;font-weight:900;margin-top:4px}
+
+.rec{
+  border-radius:16px;border:1px solid rgba(255,255,255,.12);
+  background: rgba(0,0,0,.20);
+  padding:12px;
+  margin:10px 0 12px;
+}
+.recTitle{font-weight:900;font-size:16px}
+.recDetail{font-size:12px;margin-top:6px}
+
+.seen{display:flex;gap:8px;flex-wrap:wrap;min-height:46px;margin-top:8px}
+
+.footer{padding:18px;text-align:center;color:var(--muted2);font-size:12px;margin-top:auto}
+
+.toast{
+  position: fixed; left:50%; bottom:18px; transform:translateX(-50%);
+  background: rgba(0,0,0,.75);
+  border:1px solid rgba(255,255,255,.16);
+  padding:10px 12px; border-radius: 14px;
+  color:#fff; font-size:12px;
+  opacity:0; pointer-events:none; transition: .2s ease;
+  max-width:min(720px, 92vw);
+  z-index: 50;
+}
+.toast.show{opacity:1; pointer-events:auto}
+
+.modal{
+  position:fixed; inset:0; background: rgba(0,0,0,.55);
+  display:none; align-items:center; justify-content:center;
+  z-index:60;
+}
+.modal.show{display:flex}
+.modalCard{
+  width:min(720px, 92vw);
+  background: var(--card);
+  border:1px solid rgba(255,255,255,.12);
+  border-radius:18px;
+  box-shadow: var(--shadow);
+  padding:14px;
+}
+.modalTitle{font-weight:900}
+.modalBody{margin-top:10px;line-height:1.45}
+.gridRules{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media (max-width: 520px){.gridRules{grid-template-columns:1fr}}

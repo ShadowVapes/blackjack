@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="hu">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Blackjack Recreator • Room</title>
+  <link rel="stylesheet" href="./assets/styles.css"/>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <a class="logo" href="./index.html" title="Vissza">♠</a>
+        <div>
+          <div class="title">Szoba</div>
+          <div class="subtitle" id="roomSub">—</div>
+        </div>
+      </div>
+
+      <div class="top-actions">
+        <button class="btn ghost" id="btnNewRound">Új kör</button>
+        <button class="btn ghost" id="btnResetShoe">Cipő reset</button>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="card">
+        <div class="row-between">
+          <div>
+            <h2 class="h2">Játékmód</h2>
+            <div class="muted" id="modeLine">—</div>
+          </div>
+          <div class="pill" id="rolePill">ROLE</div>
+        </div>
+
+        <div class="grid2">
+          <div class="mini">
+            <h3>Szoba</h3>
+            <div class="field">
+              <label>Room ID</label>
+              <input id="roomId" placeholder="pl. 8F3K2A" maxlength="12"/>
+            </div>
+
+            <div class="row">
+              <button class="btn" id="btnCreateRoom">Create (Host)</button>
+              <button class="btn ghost" id="btnJoinRoom">Join</button>
+            </div>
+
+            <div class="muted small">
+              Host link: <span class="mono" id="hostLink">—</span><br/>
+              Dealer link: <span class="mono" id="dealerLink">—</span>
+            </div>
+
+            <div class="row">
+              <button class="btn ghost" id="btnCopyHost">Host link másol</button>
+              <button class="btn ghost" id="btnCopyDealer">Dealer link másol</button>
+            </div>
+
+            <hr class="sep"/>
+
+            <details>
+              <summary><b>Manuális sync (ha nincs realtime)</b></summary>
+              <p class="muted">Copy/Paste állapot – gyors, ha nincs Supabase.</p>
+              <div class="row">
+                <button class="btn ghost" id="btnCopyState">State copy</button>
+                <button class="btn ghost" id="btnPasteState">State paste</button>
+              </div>
+              <textarea class="mono area" id="stateArea" placeholder="Ide jön a state JSON…"></textarea>
+            </details>
+          </div>
+
+          <div class="mini">
+            <h3>Szabályok</h3>
+            <div class="gridRules">
+              <div class="field">
+                <label>Paklik</label>
+                <select id="ruleDecks">
+                  <option>1</option><option>2</option><option>4</option><option selected>6</option><option>8</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Dealer</label>
+                <select id="ruleDealer17">
+                  <option value="S17" selected>S17 (áll soft 17-en)</option>
+                  <option value="H17">H17 (húz soft 17-re)</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Blackjack</label>
+                <select id="ruleBjPay">
+                  <option value="3:2" selected>3:2</option>
+                  <option value="6:5">6:5</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Surrender</label>
+                <select id="ruleSurrender">
+                  <option value="off">off</option>
+                  <option value="late" selected>late</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Double</label>
+                <select id="ruleDouble">
+                  <option value="any" selected>ANY</option>
+                  <option value="9-11">9–11</option>
+                  <option value="10-11">10–11</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>DAS</label>
+                <select id="ruleDAS">
+                  <option value="on" selected>on</option>
+                  <option value="off">off</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Max hands</label>
+                <select id="ruleMaxHands">
+                  <option>2</option><option selected>4</option><option>6</option><option>8</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Split A</label>
+                <select id="ruleSplitA">
+                  <option value="one" selected>1 lap / hand</option>
+                  <option value="free">normál</option>
+                </select>
+              </div>
+            </div>
+            <p class="muted small">Megjegyzés: az ajánló a standard multi‑deck basic + TC deviációk alapján dolgozik.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="grid3">
+          <div class="mini">
+            <div class="row-between">
+              <h3>Játékos (te)</h3>
+              <span class="pill small" id="playerLock">edit</span>
+            </div>
+
+            <div class="hand" id="playerHand"></div>
+            <div class="row-between">
+              <div class="muted" id="playerTotal">Total: —</div>
+              <div class="row">
+                <button class="btn ghost small" id="btnPlayerClear">Törlés</button>
+              </div>
+            </div>
+
+            <div class="picker" id="playerPicker"></div>
+          </div>
+
+          <div class="mini">
+            <div class="row-between">
+              <h3>Dealer</h3>
+              <span class="pill small" id="dealerLock">edit</span>
+            </div>
+
+            <div class="hand" id="dealerHand"></div>
+            <div class="row-between">
+              <div class="muted" id="dealerTotal">Upcard: —</div>
+              <div class="row">
+                <button class="btn ghost small" id="btnDealerClear">Törlés</button>
+              </div>
+            </div>
+
+            <div class="picker" id="dealerPicker"></div>
+
+            <div class="row">
+              <label class="check">
+                <input type="checkbox" id="showHole"/>
+                <span>Hole card is ismert</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="mini">
+            <h3>Ajánlás</h3>
+            <div class="kpi">
+              <div>
+                <div class="kpiTitle">Running Count</div>
+                <div class="kpiVal mono" id="rcOut">0</div>
+              </div>
+              <div>
+                <div class="kpiTitle">True Count</div>
+                <div class="kpiVal mono" id="tcOut">0.00</div>
+              </div>
+            </div>
+
+            <div class="kpi">
+              <div>
+                <div class="kpiTitle">Maradék lap</div>
+                <div class="kpiVal mono" id="remCardsOut">—</div>
+              </div>
+              <div>
+                <div class="kpiTitle">Maradék pakli</div>
+                <div class="kpiVal mono" id="remDecksOut">—</div>
+              </div>
+            </div>
+
+            <div class="rec" id="recBox">
+              <div class="recTitle">—</div>
+              <div class="recDetail muted" id="recDetail">Adj meg lapokat…</div>
+            </div>
+
+            <div class="row">
+              <button class="btn" id="btnAuto">AUTO lépés</button>
+              <button class="btn ghost" id="btnExplain">Miért?</button>
+            </div>
+
+            <details>
+              <summary><b>TC deviációk</b></summary>
+              <ul class="muted small" id="devList"></ul>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="grid2">
+          <div class="mini">
+            <h3>Kijátszott lapok (shoe)</h3>
+            <p class="muted small">A count ezekből számol. A “Cipő reset” lenullázza.</p>
+
+            <div class="row-between">
+              <div class="muted small">Kártyák: <span class="mono" id="seenCount">0</span></div>
+              <div class="row">
+                <button class="btn ghost small" id="btnSeenClear">Törlés</button>
+              </div>
+            </div>
+
+            <div class="seen" id="seenList"></div>
+            <div class="picker" id="seenPicker"></div>
+          </div>
+
+          <div class="mini">
+            <h3>Realtime (opcionális)</h3>
+            <p class="muted small">Supabase Realtime Broadcast – csak ha akarsz valós syncet.</p>
+
+            <div class="field">
+              <label>Supabase URL</label>
+              <input id="sbUrl" placeholder="https://xxxx.supabase.co"/>
+            </div>
+            <div class="field">
+              <label>Supabase anon key</label>
+              <input id="sbKey" placeholder="eyJhbGciOi..."/>
+            </div>
+
+            <div class="row">
+              <button class="btn ghost" id="btnSbSave">Mentés</button>
+              <button class="btn" id="btnSbConnect">Connect</button>
+            </div>
+
+            <div class="muted small">Állapot: <span class="mono" id="rtStatus">offline</span></div>
+          </div>
+        </div>
+      </section>
+
+      <div class="toast" id="toast"></div>
+      <div class="modal" id="modal">
+        <div class="modalCard">
+          <div class="row-between">
+            <div class="modalTitle" id="modalTitle">—</div>
+            <button class="btn ghost small" id="modalClose">X</button>
+          </div>
+          <div class="modalBody muted" id="modalBody">—</div>
+        </div>
+      </div>
+
+    </main>
+
+    <footer class="footer">
+      <span class="muted">Tip: ha csak single kell, hagyd a realtime részt üresen.</span>
+    </footer>
+  </div>
+
+  <script src="./assets/strategy.js"></script>
+  <script src="./assets/count.js"></script>
+  <script src="./assets/supabase.js"></script>
+  <script src="./assets/room.js"></script>
+</body>
+</html>

@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="hu">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Blackjack Recreator</title>
+  <link rel="stylesheet" href="./assets/styles.css"/>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">♠</div>
+        <div>
+          <div class="title">Blackjack Recreator</div>
+          <div class="subtitle">Valós leosztás újrajátszása • count + true count • döntés ajánló</div>
+        </div>
+      </div>
+      <a class="btn ghost" href="./room.html">Belépés</a>
+    </header>
+
+    <main class="container">
+      <section class="card">
+        <h2>Kezdés</h2>
+        <p class="muted">
+          Single-playerben az egészet te állítod. Multiplayerben a <b>Host</b> a játékos lapjait,
+          a <b>Dealer</b> a dealer lapjait állítja. A rendszer Hi‑Lo alapján számol, true counttal,
+          és a táblázatnak megfelelően ajánl lépést (plusz pár TC‑deviáció).
+        </p>
+
+        <div class="grid2">
+          <div class="mini">
+            <h3>Single-player</h3>
+            <p class="muted">Egyedül játszol / gyakorlás / gyors teszt.</p>
+            <a class="btn" href="./room.html#mode=single">Indítás</a>
+          </div>
+          <div class="mini">
+            <h3>Multiplayer</h3>
+            <p class="muted">Host létrehoz szobát, küldi a Dealer linket.</p>
+            <a class="btn" href="./room.html#mode=multi">Szoba létrehozás / belépés</a>
+          </div>
+        </div>
+
+        <hr class="sep"/>
+
+        <details>
+          <summary><b>Valódi online szinkron (GitHub Pages)</b> – Supabase beállítás</summary>
+          <p class="muted">
+            GitHub Pages statikus, ezért a valós idejű multiplayerhez kell egy realtime szolgáltatás.
+            A kód támogatja a Supabase Realtime Broadcastot (ingyenes csomag is elég).
+          </p>
+          <ol class="muted">
+            <li>Hozz létre Supabase projektet.</li>
+            <li>Project Settings → API: másold ki az <b>Project URL</b> és <b>anon key</b>-t.</li>
+            <li>Room oldalon → <b>Realtime</b> panel → illeszd be (localStorage-be menti).</li>
+          </ol>
+          <p class="muted">Ha nincs Supabase, akkor is megy single-player, és van manuális “state copy/paste” szinkron.</p>
+        </details>
+      </section>
+
+      <section class="card">
+        <h2>Mit számol?</h2>
+        <ul class="muted">
+          <li><b>Running count</b> (Hi‑Lo): 2–6 +1, 7–9 0, 10–A −1</li>
+          <li><b>True count</b>: RC / (maradék paklik), a cipőből kivont kijátszott lapok alapján</li>
+          <li><b>Ajánlás</b>: basic strategy (multi‑deck S17 alap) + TC‑deviációk</li>
+        </ul>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span class="muted">GitHub Pages-ready • nincs backend kötelezően</span>
+    </footer>
+  </div>
+</body>
+</html>
