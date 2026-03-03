@@ -234,36 +234,46 @@
 
   // ---- UI helpers ----
   function makePicker(container, onPick){
-    container.innerHTML = "";
-    for(const r of RANKS){
-      const b = document.createElement("button");
-      b.className = "pickBtn";
-      b.textContent = r;
-      b.addEventListener("click", ()=>onPick({ kind:"rank", value:r }));
-      container.appendChild(b);
-    }
-    for(const s of SUITS){
-      const b = document.createElement("button");
-      b.className = "pickBtn suit " + ((s==="♥"||s==="♦")?"red":"");
-      b.textContent = s;
-      b.addEventListener("click", ()=>onPick({ kind:"suit", value:s }));
-      container.appendChild(b);
-    }
+  container.innerHTML = "";
+  for(const r of RANKS){
+    const b = document.createElement("button");
+    b.className = "pickBtn";
+    b.type = "button";
+    // Display-only suit icon for "card look"
+    b.innerHTML = `<span class="pRank">${r}</span><span class="pSuit">♠</span>`;
+    b.addEventListener("click", ()=>onPick({ kind:"rank", value:r }));
+    container.appendChild(b);
   }
+}
 
   function cardChip(card, onRemove, canEdit){
-    const el = document.createElement("div");
-    el.className = "cardChip";
-    const rank = document.createElement("span"); rank.className="rank"; rank.textContent=card.rank;
-    const suit = document.createElement("span"); suit.className="suit"; suit.textContent=card.suit;
-    const btn = document.createElement("button"); btn.textContent="×"; btn.title="Remove";
-    btn.disabled = !canEdit;
-    btn.addEventListener("click", ()=>{ if(canEdit) onRemove(); });
-    el.append(rank,suit,btn);
-    return el;
-  }
+  const el = document.createElement("div");
+  el.className = "cardChip";
+  el.setAttribute("role","button");
+  el.setAttribute("tabindex", canEdit ? "0" : "-1");
+  el.setAttribute("aria-disabled", canEdit ? "false" : "true");
 
-  function renderHand(containerId, cards, canEdit, onRemoveAt){
+  const rank = document.createElement("div");
+  rank.className = "rank";
+  rank.textContent = card.rank;
+
+  const suit = document.createElement("div");
+  suit.className = "suit" + ((card.suit==="♥"||card.suit==="♦") ? " red" : "");
+  suit.textContent = card.suit;
+
+  el.append(rank, suit);
+
+  function fire(){
+    if(!canEdit) return;
+    onRemove();
+  }
+  el.addEventListener("click", fire);
+  el.addEventListener("keydown", (e)=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); fire(); }});
+
+  return el;
+}
+
+function renderHand(containerId, cards, canEdit, onRemoveAt){
     const wrap = $(containerId);
     wrap.innerHTML = "";
     cards.forEach((c, idx)=>{
@@ -298,23 +308,19 @@
     setPill(dealerLock, dEdit ? "edit" : "locked", dEdit ? "good" : "bad");
   }
 
-  let pickState = {
-    player: { rank:null, suit:null },
-    dealer: { rank:null, suit:null },
-    seen: { rank:null, suit:null },
-  };
-  function pickToCard(which, pick){
-    if(pick.kind === "rank") pickState[which].rank = pick.value;
-    if(pick.kind === "suit") pickState[which].suit = pick.value;
-    const {rank, suit} = pickState[which];
-    if(rank && suit){
-      pickState[which] = { rank:null, suit:null };
-      return { rank, suit };
-    }
-    return null;
-  }
+  // Suit is only for display; input is rank-only.
+const suitCursor = { player: 0, dealer: 0, seen: 0 };
+function autoSuit(which){
+  const i = (suitCursor[which] || 0);
+  suitCursor[which] = i + 1;
+  return SUITS[i % SUITS.length];
+}
+function pickToCard(which, pick){
+  if(pick.kind !== "rank") return null;
+  return { rank: pick.value, suit: autoSuit(which) };
+}
 
-  function addCardTo(listName, card){
+function addCardTo(listName, card){
     state[listName].push(card);
     persist();
     renderAll();
@@ -346,9 +352,11 @@
 
   function compute(){
     const decks = parseInt(state.rules.decks,10) || 6;
-    const rc = window.BJCount.runningCount(state.seen);
-    const rem = window.BJCount.remainingFromSeen(decks, state.seen.length);
-    const tc = window.BJCount.trueCount(rc, rem.remainingDecks);
+const dealerVisible = state.showHole ? state.dealer : state.dealer.slice(0,1);
+const dealt = [...state.seen, ...state.player, ...dealerVisible];
+const rc = window.BJCount.runningCount(dealt);
+const rem = window.BJCount.remainingFromSeen(decks, dealt.length);
+const tc = window.BJCount.trueCount(rc, rem.remainingDecks);
 
     $("rcOut").textContent = String(rc);
     $("tcOut").textContent = tc.toFixed(2);
@@ -509,16 +517,33 @@
     $("btnSeenClear").addEventListener("click", ()=> clearList("seen"));
 
     $("btnNewRound").addEventListener("click", ()=>{
-      state.player = [];
-      state.dealer = [];
-      state.showHole = false;
-      renderAll();
-      if(state.mode === "multi" && rtReady){
-        rtBroadcast({ player: state.player }, "host");
-        rtBroadcast({ dealer: state.dealer, showHole:false }, "dealer");
-      }
-      showToast("Új kör");
-    });
+  // Multiplayer: only Host can finalize a round (avoids race)
+  if(state.mode === "multi" && state.role !== "host"){
+    showToast("Csak a HOST indíthatja a következő kört");
+    return;
+  }
+  const dealerVisible = state.showHole ? state.dealer : state.dealer.slice(0,1);
+  const toMove = [...state.player, ...dealerVisible];
+  if(toMove.length === 0){
+    showToast("Nincs mit menteni (adj meg lapokat)");
+    return;
+  }
+  state.seen.push(...toMove);
+
+  state.player = [];
+  state.dealer = [];
+  state.showHole = false;
+
+  persist();
+  renderAll();
+
+  if(state.mode === "multi" && rtReady){
+    rtBroadcast({ seen: state.seen }, "any");
+    rtBroadcast({ player: state.player }, "host");
+    rtBroadcast({ dealer: state.dealer, showHole:false }, "dealer");
+  }
+  showToast("Következő kör ✓ (kör mentve a shoe-ba)");
+});
     $("btnResetShoe").addEventListener("click", ()=>{
       state.seen = [];
       renderAll();

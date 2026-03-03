@@ -18,7 +18,7 @@
       </div>
 
       <div class="top-actions">
-        <button class="btn ghost" id="btnNewRound">Új kör</button>
+        <button class="btn ghost" id="btnNewRound">Következő kör</button>
         <button class="btn ghost" id="btnResetShoe">Cipő reset</button>
       </div>
     </header>
@@ -142,6 +142,7 @@
             </div>
 
             <div class="hand" id="playerHand"></div>
+            <div class="muted small" id="playerHandNote">Tipp: katt a kártyára a törléshez.</div>
             <div class="row-between">
               <div class="muted" id="playerTotal">Total: —</div>
               <div class="row">
@@ -159,6 +160,7 @@
             </div>
 
             <div class="hand" id="dealerHand"></div>
+            <div class="muted small" id="dealerHandNote">Tipp: katt a kártyára a törléshez.</div>
             <div class="row-between">
               <div class="muted" id="dealerTotal">Upcard: —</div>
               <div class="row">
@@ -222,7 +224,7 @@
         <div class="grid2">
           <div class="mini">
             <h3>Kijátszott lapok (shoe)</h3>
-            <p class="muted small">A count ezekből számol. A “Cipő reset” lenullázza.</p>
+            <p class="muted small">A count a kijátszott + aktuális kör lapjaiból számol. A “Következő kör” átteszi az aktuális kör lapjait a kijátszottba.</p>
 
             <div class="row-between">
               <div class="muted small">Kártyák: <span class="mono" id="seenCount">0</span></div>
@@ -232,6 +234,7 @@
             </div>
 
             <div class="seen" id="seenList"></div>
+            <div class="muted small" id="seenNote">Tipp: katt a kártyára a törléshez.</div>
             <div class="picker" id="seenPicker"></div>
           </div>
 
