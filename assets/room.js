@@ -75,6 +75,85 @@
 
   let state = defaultState();
 
+  // Bet sizing is LOCAL ONLY (not synced to room). Stored in localStorage.
+  let betSettings = {
+    base: 1000,        // 1 unit
+    ramp: "1-6",       // "1-6" | "1-10" | "custom"
+    custom: "0:1,1:2,2:3,3:4,4:5,5:6",
+    cap: 6,            // max units
+    round: 0           // 0/10/100/1000 (round DOWN)
+  };
+
+  function loadBetSettings(){
+    try{
+      const raw = localStorage.getItem("bj_bet_settings");
+      if(!raw) return;
+      const o = JSON.parse(raw);
+      if(typeof o.base === "number") betSettings.base = o.base;
+      if(typeof o.ramp === "string") betSettings.ramp = o.ramp;
+      if(typeof o.custom === "string") betSettings.custom = o.custom;
+      if(typeof o.cap === "number") betSettings.cap = o.cap;
+      if(typeof o.round === "number") betSettings.round = o.round;
+    }catch(_e){}
+  }
+  function saveBetSettings(){
+    try{ localStorage.setItem("bj_bet_settings", JSON.stringify(betSettings)); }catch(_e){}
+  }
+
+  function parseCustomRamp(str){
+    // "0:1,1:2,2:4" => [{tc:0, u:1}, ...] sorted asc
+    const out = [];
+    const s = String(str||"").trim();
+    if(!s) return out;
+    const parts = s.split(/[;\n]+/).join(",").split(",");
+    for(const p0 of parts){
+      const p = p0.trim();
+      if(!p) continue;
+      const m = p.match(/^\s*(-?\d+)\s*:\s*(\d+)\s*$/);
+      if(!m) continue;
+      const tc = parseInt(m[1],10);
+      const u  = parseInt(m[2],10);
+      if(!Number.isFinite(tc) || !Number.isFinite(u)) continue;
+      out.push({ tc, u });
+    }
+    out.sort((a,b)=>a.tc-b.tc);
+    return out;
+  }
+
+  function betUnitsFromTC(tc){
+    const tci = Math.floor(tc);
+    if(tci <= 0) return 1;
+
+    if(betSettings.ramp === "1-10"){
+      if(tci === 1) return 2;
+      if(tci === 2) return 4;
+      if(tci === 3) return 6;
+      if(tci === 4) return 8;
+      return 10; // 5+
+    }
+
+    if(betSettings.ramp === "custom"){
+      const map = parseCustomRamp(betSettings.custom);
+      if(!map.length) return Math.min(6, tci + 1);
+      let best = null;
+      for(const it of map){
+        if(it.tc <= tci) best = it;
+        else break;
+      }
+      if(best) return best.u;
+      return 1;
+    }
+
+    // default 1-6
+    return Math.min(6, tci + 1);
+  }
+
+  function roundDown(amount, step){
+    const s = Number(step)||0;
+    if(s <= 0) return amount;
+    return Math.floor(amount / s) * s;
+  }
+
   function loadPersist(){
     try{
       const raw = localStorage.getItem("bj_recreator_state");
@@ -432,10 +511,28 @@ function pickToCard(which, pick){
     const rem = window.BJCount.remainingFromSeen(decks, dealt.length);
     const tc = window.BJCount.trueCount(rc, rem.remainingDecks);
 
+    // Bet recommendation should be for the NEXT ROUND (before dealing): use shoe-only cards.
+    const rcShoe = window.BJCount.runningCount(state.seen);
+    const remShoe = window.BJCount.remainingFromSeen(decks, state.seen.length);
+    const tcShoe = window.BJCount.trueCount(rcShoe, remShoe.remainingDecks);
+    const unitsRaw = betUnitsFromTC(tcShoe);
+    const cap = Math.max(1, parseInt(betSettings.cap,10) || 6);
+    const units = Math.min(cap, Math.max(1, unitsRaw));
+    const base = Math.max(0, parseFloat(betSettings.base) || 0);
+    const bet = roundDown(base * units, betSettings.round);
+
     $("rcOut").textContent = String(rc);
     $("tcOut").textContent = tc.toFixed(2);
     $("remCardsOut").textContent = String(rem.remainingCards);
     $("remDecksOut").textContent = rem.remainingDecks.toFixed(2);
+
+    // Bet UI
+    if($("betOut")){
+      $("betOut").textContent = bet ? `${bet.toLocaleString('hu-HU')}  (${units}u)` : `0  (${units}u)`;
+    }
+    if($("betMeta")){
+      $("betMeta").textContent = `shoe RC: ${rcShoe} • shoe TC: ${tcShoe.toFixed(2)} • cap: ${cap}u`;
+    }
 
     const pTotal = window.BJStrategy.handTotal(activeHand());
     $("playerTotal").textContent = `Total: ${pTotal.total} (${pTotal.soft ? "soft" : "hard"})`;
@@ -475,7 +572,7 @@ function pickToCard(which, pick){
       t==="HIT" ? "rgba(255,211,107,.35)" :
       t==="SURRENDER" ? "rgba(255,77,77,.35)" : "rgba(255,255,255,.12)";
 
-    return { rc, tc, rem, rec };
+    return { rc, tc, rem, rec, bet, units, tcShoe };
   }
 
   function renderAll(){
@@ -503,6 +600,14 @@ function pickToCard(which, pick){
     $("ruleMaxHands").value = String(state.rules.maxHands);
     $("ruleSplitA").value = state.rules.splitA;
 
+    // bet UI (local)
+    if($("betBase")) $("betBase").value = String(betSettings.base ?? 0);
+    if($("betRamp")) $("betRamp").value = betSettings.ramp || "1-6";
+    if($("betCustom")) $("betCustom").value = betSettings.custom || "";
+    if($("betCap")) $("betCap").value = String(betSettings.cap ?? 6);
+    if($("betRound")) $("betRound").value = String(betSettings.round ?? 0);
+    if($("betCustomWrap")) $("betCustomWrap").style.display = (betSettings.ramp === "custom") ? "block" : "none";
+
     compute();
     persist();
   }
@@ -524,10 +629,10 @@ function pickToCard(which, pick){
   }
 
   function applyAuto(){
-    const { rec, tc } = compute();
+    const { rec, tc, bet, units, tcShoe } = compute();
     if(!rec.action){ showToast("Nincs ajánlás"); return; }
     showToast(`Ajánlott: ${rec.action}`);
-    openModal("AUTO", `Ajánlott lépés: ${rec.action}\n\n${rec.detail}\n\nTC: ${tc.toFixed(2)}\n\nMegjegyzés: basic strategy + TC deviációk.`);
+    openModal("AUTO", `Ajánlott lépés: ${rec.action}\n\n${rec.detail}\n\nTC (aktuális döntéshez): ${tc.toFixed(2)}\nAjánlott tét (köv. kör): ${bet}  (${units}u) • shoe TC: ${tcShoe.toFixed(2)}\n\nMegjegyzés: basic strategy + TC deviációk. A nyerő/vesztő széria normális (variancia).`);
   }
 
   function exportState(){
@@ -558,6 +663,7 @@ function pickToCard(which, pick){
     if(__bj_inited) return;
     __bj_inited = true;
     loadPersist();
+    loadBetSettings();
 
     const h = parseHash();
     state.mode = (h.mode === "multi") ? "multi" : "single";
@@ -667,12 +773,58 @@ function pickToCard(which, pick){
     });
 $("btnAuto").addEventListener("click", applyAuto);
     $("btnExplain").addEventListener("click", ()=>{
-      const { rec, tc } = compute();
-      openModal("Miért ez?", `${rec.title}\n\n${rec.detail}\n\nTC: ${tc.toFixed(2)}\n\nMegjegyzés: basic strategy + TC deviációk.`);
+      const { rec, tc, bet, units, tcShoe } = compute();
+      openModal("Miért ez?", `${rec.title}\n\n${rec.detail}\n\nTC (aktuális döntéshez): ${tc.toFixed(2)}\nAjánlott tét (köv. kör): ${bet}  (${units}u) • shoe TC: ${tcShoe.toFixed(2)}\n\nMegjegyzés: basic strategy + TC deviációk.`);
     });
 
     ["ruleDecks","ruleDealer17","ruleBjPay","ruleSurrender","ruleDouble","ruleDAS","ruleMaxHands","ruleSplitA"]
       .forEach(id => $(id).addEventListener("change", applyRulesFromUI));
+
+    // Bet UI (local-only)
+    const syncBetCustomUI = ()=>{
+      const wrap = $("betCustomWrap");
+      if(wrap) wrap.style.display = (betSettings.ramp === "custom") ? "block" : "none";
+    };
+
+    if($("betBase")){
+      $("betBase").addEventListener("input", ()=>{
+        betSettings.base = Math.max(0, parseFloat($("betBase").value) || 0);
+        saveBetSettings();
+        renderAll();
+      });
+    }
+    if($("betRamp")){
+      $("betRamp").addEventListener("change", ()=>{
+        betSettings.ramp = $("betRamp").value;
+        // default cap based on ramp
+        if(betSettings.ramp === "1-10" && (betSettings.cap === 6 || !betSettings.cap)) betSettings.cap = 10;
+        if(betSettings.ramp === "1-6" && (betSettings.cap === 10 || !betSettings.cap)) betSettings.cap = 6;
+        saveBetSettings();
+        syncBetCustomUI();
+        renderAll();
+      });
+    }
+    if($("betCustom")){
+      $("betCustom").addEventListener("input", ()=>{
+        betSettings.custom = $("betCustom").value;
+        saveBetSettings();
+        renderAll();
+      });
+    }
+    if($("betCap")){
+      $("betCap").addEventListener("input", ()=>{
+        betSettings.cap = Math.max(1, parseInt($("betCap").value,10) || 1);
+        saveBetSettings();
+        renderAll();
+      });
+    }
+    if($("betRound")){
+      $("betRound").addEventListener("change", ()=>{
+        betSettings.round = parseInt($("betRound").value,10) || 0;
+        saveBetSettings();
+        renderAll();
+      });
+    }
 
     // Double custom UI
     const syncDoubleCustomUI = ()=>{

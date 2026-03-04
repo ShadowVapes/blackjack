@@ -214,6 +214,55 @@
               </div>
             </div>
 
+            <div class="betPanel">
+              <div class="row-between" style="gap:10px; align-items:flex-end;">
+                <div>
+                  <div class="kpiTitle">Ajánlott tét (köv. kör)</div>
+                  <div class="kpiVal mono" id="betOut">—</div>
+                  <div class="muted small" id="betMeta">—</div>
+                </div>
+              </div>
+
+              <div class="gridRules betGrid">
+                <div class="field">
+                  <label>Alaptét (1 egység)</label>
+                  <input id="betBase" type="number" min="0" step="1" placeholder="pl. 1000"/>
+                </div>
+                <div class="field">
+                  <label>Bet spread <span class="helpIcon" title="Tét skála True Count alapján. 1–6 = óvatosabb, 1–10 = agresszívebb. A TC-t a kijátszott (shoe) lapokból számolja, tehát ez a következő körre vonatkozik.">i</span></label>
+                  <select id="betRamp">
+                    <option value="1-6" selected>1–6 (safe)</option>
+                    <option value="1-10">1–10 (aggró)</option>
+                    <option value="custom">Custom…</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="field" id="betCustomWrap" style="display:none">
+                <label>Custom (tc:egység)</label>
+                <input id="betCustom" placeholder="pl. 0:1,1:2,2:4,3:6,4:8,5:10"/>
+                <div class="helpText">A TC-t lefelé kerekítjük egészre. Mindig a legnagyobb tc-kulcsot használja, ami ≤ aktuális TC.</div>
+              </div>
+
+              <div class="gridRules betGrid">
+                <div class="field">
+                  <label>Max egység</label>
+                  <input id="betCap" type="number" min="1" step="1" placeholder="pl. 6"/>
+                </div>
+                <div class="field">
+                  <label>Kerekítés</label>
+                  <select id="betRound">
+                    <option value="0" selected>nincs</option>
+                    <option value="10">10-re</option>
+                    <option value="100">100-ra</option>
+                    <option value="1000">1000-re</option>
+                  </select>
+                </div>
+              </div>
+
+              <p class="muted small" style="margin:6px 0 0">Megj.: még tökéletes döntésekkel is lehet nagy bukó sorozat (variancia). Ez csak matematikai várható érték szerinti skála.</p>
+            </div>
+
             <div class="rec" id="recBox">
               <div class="recTitle">—</div>
               <div class="recDetail muted" id="recDetail">Adj meg lapokat…</div>

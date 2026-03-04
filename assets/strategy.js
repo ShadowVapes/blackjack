@@ -145,11 +145,15 @@
     // The screenshot chart is H17 + Late Surrender; keep these surrender spots when surrender is enabled.
     if(rules.surrender === "late"){
       // 15 vs 10/A
-      if(total === 15){ row[8] = "Rh"; row[9] = "Rh"; }
+      if(total === 15){
+        row[8] = "Rh";
+        // 15 vs A is chart-dependent (H17 chart: Rh; S17 charts often: H)
+        row[9] = (rules.dealer17 === "H17") ? "Rh" : "H";
+      }
       // 16 vs 9/10/A
       if(total === 16){ row[7] = "Rh"; row[8] = "Rh"; row[9] = "Rh"; }
       // 17 vs A
-      if(total === 17){ row[9] = "Rs"; }
+      if(total === 17){ row[9] = (rules.dealer17 === "H17") ? "Rs" : "S"; }
     }
 
     return row;
