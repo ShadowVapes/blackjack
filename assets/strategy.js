@@ -9,6 +9,7 @@
      Ph = Split if DAS (Double After Split) allowed, otherwise Hit
      Rh = Surrender if allowed, otherwise Hit
      Rs = Surrender if allowed, otherwise Stand
+     Rp = Surrender if allowed, otherwise Split
 
    Notes:
    - "Pairs" require the SAME RANK (e.g., K+Q is NOT a pair).
@@ -141,19 +142,23 @@
   function hardRow(total, rules){
     const row = (HARD_S17[total] || ["H","H","H","H","H","H","H","H","H","H"]).slice();
 
-    if(rules.dealer17 === "H17"){
-      if(total === 15){ row[9] = "Rh"; } // 15 vs A surrender
-      if(total === 17){ row[9] = "Rs"; } // 17 vs A surrender/stand
-      // 11 vs A already Dh in base
-    } else {
-      // S17: keep 17 vs A as stand (no Rs)
-      // keep 15 vs A as H by default
+    // The screenshot chart is H17 + Late Surrender; keep these surrender spots when surrender is enabled.
+    if(rules.surrender === "late"){
+      // 15 vs 10/A
+      if(total === 15){ row[8] = "Rh"; row[9] = "Rh"; }
+      // 16 vs 9/10/A
+      if(total === 16){ row[7] = "Rh"; row[8] = "Rh"; row[9] = "Rh"; }
+      // 17 vs A
+      if(total === 17){ row[9] = "Rs"; }
     }
 
     return row;
   }
 
-  // Pairs table (H17/DAS chart style):
+  // Pairs table (H17 chart style from the screenshot).
+  // Special codes:
+  //   Ph = Split if DAS allowed, otherwise Hit
+  //   Rp = Surrender if allowed, otherwise Split
   function pairCode(pairRank, up, rules){
     // pairRank is the ACTUAL rank string (A, K, Q, J, 10, 9..2)
     const pb = rankBucket(pairRank);
@@ -162,32 +167,47 @@
     if(pb === "10") return "S";
 
     if(pb === "9"){
+      // Split vs 2-6,8-9; Stand vs 7,10,A
       if([2,3,4,5,6,8,9].includes(up)) return "P";
       return "S";
     }
-    if(pb === "8") return "P";
 
-    if(pb === "7") return (up<=7) ? "P" : "H";
+    if(pb === "8"){
+      // Chart shows Rp vs A (surrender if possible, else split), split everywhere else
+      if(up === 11) return "Rp";
+      return "P";
+    }
 
-    if(pb === "6") return (up>=2 && up<=6) ? "P" : "H";
+    if(pb === "7"){
+      // Split vs 2-7
+      return (up >= 2 && up <= 7) ? "P" : "H";
+    }
+
+    if(pb === "6"){
+      // Split vs 3-6; vs 2 is Ph (DAS-dependent); otherwise Hit
+      if(up === 2) return "Ph";
+      if(up >= 3 && up <= 6) return "P";
+      return "H";
+    }
 
     // IMPORTANT: 5-5 is played like hard 10 (double 2-9, hit 10/A)
     if(pb === "5"){
-      return (up>=2 && up<=9) ? "Dh" : "H";
+      return (up >= 2 && up <= 9) ? "Dh" : "H";
     }
 
     if(pb === "4"){
-      // split 4-4 vs 5-6 only if DAS, else hit
-      if(up===5 || up===6) return "Ph";
+      // Split 4-4 vs 5-6 only if DAS, else Hit
+      if(up === 5 || up === 6) return "Ph";
       return "H";
     }
 
     if(pb === "3" || pb === "2"){
-      // chart: Ph vs 2-3, P vs 4-7, else H
-      if(up===2 || up===3) return "Ph";
-      if(up>=4 && up<=7) return "P";
+      // Chart: Ph vs 2-3, P vs 4-7, else H
+      if(up === 2 || up === 3) return "Ph";
+      if(up >= 4 && up <= 7) return "P";
       return "H";
     }
+
     return "H";
   }
 
@@ -204,6 +224,7 @@
       case "Ph": return { action: (canSplit && rules.DAS ? "SPLIT" : "HIT"), note:"Ph" };
       case "Rh": return { action: (canSurrender ? "SURRENDER" : "HIT"), note:"Rh" };
       case "Rs": return { action: (canSurrender ? "SURRENDER" : "STAND"), note:"Rs" };
+      case "Rp": return { action: (canSurrender ? "SURRENDER" : (canSplit ? "SPLIT" : "HIT")), note:"Rp" };
       default:   return { action:"HIT", note:code||"?" };
     }
   }
@@ -214,7 +235,7 @@
     { key:"15v10", label:"15 vs 10", thresh:4, when:(tc)=>tc>=4, apply:(ctx)=>!ctx.soft && ctx.total===15 && ctx.up===10, action:"STAND" },
     { key:"12v3",  label:"12 vs 3",  thresh:2, when:(tc)=>tc>=2, apply:(ctx)=>!ctx.soft && ctx.total===12 && ctx.up===3,  action:"STAND" },
     { key:"12v2",  label:"12 vs 2",  thresh:3, when:(tc)=>tc>=3, apply:(ctx)=>!ctx.soft && ctx.total===12 && ctx.up===2,  action:"STAND" },
-    { key:"11vA",  label:"11 vs A",  thresh:1, when:(tc)=>tc>=1, apply:(ctx)=>ctx.dealer17!=="H17" && !ctx.soft && ctx.total===11 && ctx.up===11, action:"DOUBLE" },
+    { key:"11vA",  label:"11 vs A",  thresh:1, when:(tc)=>tc>=1, apply:(ctx)=>!ctx.soft && ctx.total===11 && ctx.up===11, action:"DOUBLE" },
     { key:"ins",   label:"Insurance",thresh:3, when:(tc)=>tc>=3, apply:()=>false, action:null },
   ];
 

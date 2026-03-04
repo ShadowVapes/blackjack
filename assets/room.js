@@ -67,7 +67,8 @@
         DAS: true,
         maxHands: 4,
         splitA: "one" },
-      player: [],
+      hands: [[]],
+      activeHand: 0,
       dealer: [],
       seen: [] };
   }
@@ -115,11 +116,13 @@
   function mergePartial(partial, source){
     if(partial.rules) state.rules = { ...state.rules, ...partial.rules };
 
-    if(source === "host" && partial.player) state.player = partial.player;
+    if(source === "host" && partial.hands) state.hands = partial.hands;
+    if(source === "host" && typeof partial.activeHand === "number") state.activeHand = partial.activeHand;
     if(source === "dealer" && partial.dealer) state.dealer = partial.dealer;
 
     if(source === "any"){
-      if(partial.player) state.player = partial.player;
+      if(partial.hands) state.hands = partial.hands;
+      if(typeof partial.activeHand === "number") state.activeHand = partial.activeHand;
       if(partial.dealer) state.dealer = partial.dealer;
     }
 
@@ -164,7 +167,7 @@
 
           // Send initial patches
           if(state.role === "host"){
-            rtBroadcast({ player: state.player, rules: state.rules, seen: state.seen }, "host");
+            rtBroadcast({ hands: state.hands, activeHand: state.activeHand, rules: state.rules, seen: state.seen }, "host");
           } else if(state.role === "dealer"){
             rtBroadcast({ dealer: state.dealer }, "dealer");
           } else {
@@ -230,6 +233,22 @@
   }
 
   // ---- UI helpers ----
+
+  function ensureHands(){
+    if(!Array.isArray(state.hands) || state.hands.length === 0) state.hands = [[]];
+    if(typeof state.activeHand !== "number" || state.activeHand < 0) state.activeHand = 0;
+    if(state.activeHand >= state.hands.length) state.activeHand = 0;
+  }
+
+  function activeHand(){
+    ensureHands();
+    return state.hands[state.activeHand];
+  }
+
+  function allPlayerCards(){
+    ensureHands();
+    return state.hands.flat();
+  }
   function makePicker(container, onPick){
   container.innerHTML = "";
   for(const r of RANKS){
@@ -305,6 +324,36 @@ function renderHand(containerId, cards, canEdit, onRemoveAt){
     setPill(dealerLock, dEdit ? "edit" : "locked", dEdit ? "good" : "bad");
   }
 
+  function setActiveHand(idx){
+    ensureHands();
+    const n = state.hands.length;
+    const next = Math.max(0, Math.min(n-1, idx));
+    if(next === state.activeHand) return;
+    state.activeHand = next;
+    renderAll();
+    // Only host/single should sync activeHand
+    if(canEditPlayer()) broadcastHostHands();
+  }
+
+  function renderHandTabs(){
+    ensureHands();
+    const tabs = $("handTabs");
+    const hint = $("handHint");
+    if(!tabs) return;
+    tabs.innerHTML = "";
+    state.hands.forEach((h, i)=>{
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "handTab" + (i === state.activeHand ? " active" : "");
+      const t = window.BJStrategy.handTotal(h);
+      const label = h.length ? `H${i+1} (${t.total}${t.soft?"s":""})` : `H${i+1}`;
+      btn.textContent = label;
+      btn.addEventListener("click", ()=>setActiveHand(i));
+      tabs.appendChild(btn);
+    });
+    if(hint) hint.textContent = `Aktív kéz: Hand ${state.activeHand+1} / ${state.hands.length}`;
+  }
+
   // Suit is only for display; input is rank-only.
 const suitCursor = { player: 0, dealer: 0, seen: 0 };
 function autoSuit(which){
@@ -317,49 +366,78 @@ function pickToCard(which, pick){
   return { rank: pick.value, suit: autoSuit(which) };
 }
 
-function addCardTo(listName, card){
+  function broadcastHostHands(){
+    if(state.mode === "multi" && rtReady) rtBroadcast({ hands: state.hands, activeHand: state.activeHand }, "host");
+  }
+
+  function addCardTo(listName, card){
+    if(listName === "player"){
+      ensureHands();
+      activeHand().push(card);
+      persist();
+      renderAll();
+      broadcastHostHands();
+      return;
+    }
     state[listName].push(card);
     persist();
     renderAll();
     if(state.mode === "multi" && rtReady){
-      if(listName === "player") rtBroadcast({ player: state.player }, "host");
-      else if(listName === "dealer") rtBroadcast({ dealer: state.dealer }, "dealer");
+      if(listName === "dealer") rtBroadcast({ dealer: state.dealer }, "dealer");
       else if(listName === "seen") rtBroadcast({ seen: state.seen }, "any");
     }
   }
+
   function removeCardFrom(listName, idx){
+    if(listName === "player"){
+      ensureHands();
+      activeHand().splice(idx, 1);
+      persist();
+      renderAll();
+      broadcastHostHands();
+      return;
+    }
     state[listName].splice(idx, 1);
     persist();
     renderAll();
     if(state.mode === "multi" && rtReady){
-      if(listName === "player") rtBroadcast({ player: state.player }, "host");
-      else if(listName === "dealer") rtBroadcast({ dealer: state.dealer }, "dealer");
+      if(listName === "dealer") rtBroadcast({ dealer: state.dealer }, "dealer");
       else if(listName === "seen") rtBroadcast({ seen: state.seen }, "any");
     }
   }
+
   function clearList(listName){
+    if(listName === "player"){
+      ensureHands();
+      state.hands[state.activeHand] = [];
+      persist();
+      renderAll();
+      broadcastHostHands();
+      return;
+    }
     state[listName] = [];
     persist();
     renderAll();
     if(state.mode === "multi" && rtReady){
       const patch = {}; patch[listName] = [];
-      rtBroadcast(patch, listName==="player"?"host": listName==="dealer"?"dealer":"any");
+      rtBroadcast(patch, listName==="dealer"?"dealer":"any");
     }
   }
 
   function compute(){
     const decks = parseInt(state.rules.decks,10) || 6;
-const dealt = [...state.seen, ...state.player, ...state.dealer];
-const rc = window.BJCount.runningCount(dealt);
-const rem = window.BJCount.remainingFromSeen(decks, dealt.length);
-const tc = window.BJCount.trueCount(rc, rem.remainingDecks);
+    ensureHands();
+    const dealt = [...state.seen, ...allPlayerCards(), ...state.dealer];
+    const rc = window.BJCount.runningCount(dealt);
+    const rem = window.BJCount.remainingFromSeen(decks, dealt.length);
+    const tc = window.BJCount.trueCount(rc, rem.remainingDecks);
 
     $("rcOut").textContent = String(rc);
     $("tcOut").textContent = tc.toFixed(2);
     $("remCardsOut").textContent = String(rem.remainingCards);
     $("remDecksOut").textContent = rem.remainingDecks.toFixed(2);
 
-    const pTotal = window.BJStrategy.handTotal(state.player);
+    const pTotal = window.BJStrategy.handTotal(activeHand());
     $("playerTotal").textContent = `Total: ${pTotal.total} (${pTotal.soft ? "soft" : "hard"})`;
     const dUp = state.dealer[0] ? `${state.dealer[0].rank}${state.dealer[0].suit}` : "—";
     $("dealerTotal").textContent = `Dealer up: ${dUp} • lapok: ${state.dealer.length}`;
@@ -387,7 +465,7 @@ const tc = window.BJCount.trueCount(rc, rem.remainingDecks);
       splitA: state.rules.splitA
     };
 
-    const rec = window.BJStrategy.recommend(state.player, state.dealer, rules, tc);
+    const rec = window.BJStrategy.recommend(activeHand(), state.dealer, rules, tc);
 
     const box = $("recBox");
     box.querySelector(".recTitle").textContent = rec.title || "—";
@@ -403,7 +481,8 @@ const tc = window.BJCount.trueCount(rc, rem.remainingDecks);
   function renderAll(){
     renderRole();
 
-    renderHand("playerHand", state.player, canEditPlayer(), (idx)=>removeCardFrom("player", idx));
+    renderHandTabs();
+    renderHand("playerHand", activeHand(), canEditPlayer(), (idx)=>removeCardFrom("player", idx));
     renderHand("dealerHand", state.dealer, canEditDealer(), (idx)=>removeCardFrom("dealer", idx));
 
     $("seenCount").textContent = String(state.seen.length);
@@ -455,7 +534,8 @@ const tc = window.BJCount.trueCount(rc, rem.remainingDecks);
     const pack = {
       v: state.v,
       rules: state.rules,
-      player: state.player,
+      hands: state.hands,
+      activeHand: state.activeHand,
       dealer: state.dealer,
       seen: state.seen
     };
@@ -464,7 +544,9 @@ const tc = window.BJCount.trueCount(rc, rem.remainingDecks);
   function importState(raw){
     const obj = JSON.parse(raw);
     if(obj.rules) state.rules = { ...state.rules, ...obj.rules };
-    if(Array.isArray(obj.player)) state.player = obj.player;
+    if(Array.isArray(obj.hands)) state.hands = obj.hands;
+    else if(Array.isArray(obj.player)) state.hands = [obj.player]; // backward compat
+    if(typeof obj.activeHand === "number") state.activeHand = obj.activeHand;
     if(Array.isArray(obj.dealer)) state.dealer = obj.dealer;
     if(Array.isArray(obj.seen)) state.seen = obj.seen;
     renderAll();
@@ -510,20 +592,61 @@ const tc = window.BJCount.trueCount(rc, rem.remainingDecks);
     $("btnDealerClear").addEventListener("click", ()=>{ if(canEditDealer()) clearList("dealer"); });
     $("btnSeenClear").addEventListener("click", ()=> clearList("seen"));
 
+    // Multi-hand controls
+    $("btnSplitHand").addEventListener("click", ()=>{
+      if(!canEditPlayer()) return showToast("Player locked");
+      ensureHands();
+      const maxHands = parseInt(state.rules.maxHands, 10) || 4;
+      if(state.hands.length >= maxHands){
+        return showToast(`Max hands elérve (${maxHands})`);
+      }
+      const h = activeHand();
+      let newHand = [];
+      // If it's a real pair on exactly 2 cards, move one card to the new hand (real split feel)
+      if(h.length === 2 && String(h[0].rank) === String(h[1].rank)){
+        newHand = [h.pop()];
+      }
+      state.hands.push(newHand);
+      state.activeHand = state.hands.length - 1;
+      persist();
+      renderAll();
+      broadcastHostHands();
+      showToast("Új kéz létrehozva");
+    });
+
+    $("btnRemoveHand").addEventListener("click", ()=>{
+      if(!canEditPlayer()) return showToast("Player locked");
+      ensureHands();
+      if(state.hands.length <= 1){
+        return showToast("Minimum 1 kéz kell");
+      }
+      const h = activeHand();
+      if(h.length){
+        return showToast("Előbb töröld az aktív kéz lapjait");
+      }
+      state.hands.splice(state.activeHand, 1);
+      if(state.activeHand >= state.hands.length) state.activeHand = state.hands.length - 1;
+      persist();
+      renderAll();
+      broadcastHostHands();
+      showToast("Kéz törölve");
+    });
+
     $("btnNewRound").addEventListener("click", ()=>{
   // Multiplayer: only Host can finalize a round (avoids race)
   if(state.mode === "multi" && state.role !== "host"){
     showToast("Csak a HOST indíthatja a következő kört");
     return;
   }
-  const toMove = [...state.player, ...state.dealer];
+  const toMove = [...allPlayerCards(), ...state.dealer];
   if(toMove.length === 0){
     showToast("Nincs mit menteni (adj meg lapokat)");
     return;
   }
   state.seen.push(...toMove);
 
-  state.player = [];
+  state.hands = [[]];
+  state.activeHand = 0;
   state.dealer = [];
 
   persist();
@@ -531,7 +654,7 @@ const tc = window.BJCount.trueCount(rc, rem.remainingDecks);
 
   if(state.mode === "multi" && rtReady){
     rtBroadcast({ seen: state.seen }, "any");
-    rtBroadcast({ player: state.player }, "host");
+    rtBroadcast({ hands: state.hands, activeHand: state.activeHand }, "host");
     rtBroadcast({ dealer: state.dealer }, "dealer");
   }
   showToast("Következő kör ✓ (kör mentve a shoe-ba)");

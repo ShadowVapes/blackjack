@@ -102,9 +102,18 @@ input:focus, select:focus{border-color:rgba(124,92,255,.55);box-shadow:0 0 0 3px
 .check{display:flex;gap:10px;align-items:center;font-size:12px;color:var(--muted)}
 .check input{accent-color: var(--accent); width:16px; height:16px}
 
-.hand{display:flex;gap:10px;flex-wrap:wrap;min-height:92px;align-items:flex-start}
+.hand{display:flex;gap:10px;flex-wrap:wrap;min-height:110px;align-items:flex-start}
+.handTabs{display:flex;gap:8px;flex-wrap:wrap}
+.handTab{
+  height:32px; padding:0 10px; border-radius:999px;
+  border:1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.06);
+  color:#fff; cursor:pointer; font-weight:800; font-size:12px;
+}
+.handTab.active{background: rgba(124,92,255,.22); border-color: rgba(124,92,255,.35)}
+.handTab:hover{background: rgba(255,255,255,.10)}
 .cardChip{
-  width:78px;height:112px;
+  width:90px;height:130px;
   display:flex;flex-direction:column;
   align-items:flex-start;justify-content:flex-start;
   padding:8px 8px;
@@ -119,8 +128,8 @@ input:focus, select:focus{border-color:rgba(124,92,255,.55);box-shadow:0 0 0 3px
 }
 .cardChip:hover{outline:2px solid rgba(124,92,255,.35)}
 .cardChip[aria-disabled="true"]{opacity:.55;cursor:default;outline:none}
-.cardChip .rank{font-weight:900;font-size:18px;line-height:1}
-.cardChip .suit{font-size:20px;line-height:1;margin-top:2px}
+.cardChip .rank{font-weight:900;font-size:20px;line-height:1}
+.cardChip .suit{font-size:22px;line-height:1;margin-top:2px}
 .cardChip .suit.red{color:#c01616}
 
 .picker{display:grid;grid-template-columns: repeat(7, minmax(0, 1fr));gap:10px;margin-top:10px}
@@ -128,7 +137,7 @@ input:focus, select:focus{border-color:rgba(124,92,255,.55);box-shadow:0 0 0 3px
   .picker{grid-template-columns: repeat(5, minmax(0, 1fr));}
 }
 .pickBtn{
-  height:68px;border-radius:12px;border:1px solid rgba(255,255,255,.14);
+  height:76px;border-radius:12px;border:1px solid rgba(255,255,255,.14);
   background:#ffffff;
   color:#111;
   cursor:pointer;
@@ -140,8 +149,8 @@ input:focus, select:focus{border-color:rgba(124,92,255,.55);box-shadow:0 0 0 3px
   padding:8px 10px;
   box-shadow: 0 10px 22px rgba(0,0,0,.18);
 }
-.pickBtn .pRank{font-size:18px;line-height:1}
-.pickBtn .pSuit{font-size:20px;line-height:1;margin-top:4px;opacity:.9}
+.pickBtn .pRank{font-size:19px;line-height:1}
+.pickBtn .pSuit{font-size:21px;line-height:1;margin-top:4px;opacity:.9}
 .pickBtn:hover{outline:2px solid rgba(124,92,255,.35)}
 
 .kpi{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0}
