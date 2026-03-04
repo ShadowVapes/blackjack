@@ -214,3 +214,6 @@ input:focus, select:focus{border-color:rgba(124,92,255,.55);box-shadow:0 0 0 3px
   margin:10px 0 12px;
 }
 .betGrid .field{margin:6px 0}
+
+
+.btn.tiny{height:30px;padding:0 10px;border-radius:10px;font-size:12px;font-weight:700}

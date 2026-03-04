@@ -67,6 +67,13 @@
 
           <div class="mini">
             <h3>Szabályok</h3>
+
+            <div class="row-between" style="gap:8px; margin:6px 0 10px;">
+              <button class="btn tiny" id="presetH17">Preset: H17 (BJA)</button>
+              <button class="btn tiny" id="presetS17">Preset: S17 (BJA)</button>
+              <span class="muted small" title="A szimulátorod szabályait állítsd ide, különben eltérés lesz.">i</span>
+            </div>
+
             <div class="gridRules">
               <div class="field">
                 <label>Paklik</label>
@@ -212,7 +219,7 @@
                 <div class="kpiTitle">Maradék pakli</div>
                 <div class="kpiVal mono" id="remDecksOut">—</div>
               </div>
-            </div>
+            <div class="muted small" style="margin:6px 0 10px;">Megj.: a deviációk és tét-emelés <b>True Count</b> alapján mennek (nem a Running Count).</div>
 
             <div class="betPanel">
               <div class="row-between" style="gap:10px; align-items:flex-end;">

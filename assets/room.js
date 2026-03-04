@@ -780,6 +780,25 @@ $("btnAuto").addEventListener("click", applyAuto);
     ["ruleDecks","ruleDealer17","ruleBjPay","ruleSurrender","ruleDouble","ruleDAS","ruleMaxHands","ruleSplitA"]
       .forEach(id => $(id).addEventListener("change", applyRulesFromUI));
 
+    // Presets (BJA-style common rules)
+    const applyPreset = (dealer17) => {
+      $("ruleDealer17").value = dealer17;
+      $("ruleBjPay").value = "3:2";
+      $("ruleSurrender").value = "late";
+      $("ruleDouble").value = "any";
+      if($("ruleDoubleCustom")) $("ruleDoubleCustom").value = "";
+      $("ruleDAS").value = "on";
+      $("ruleSplitA").value = "one";
+      // leave decks as-is (user might be on 6 or 8), but if empty set to 6
+      if(!$("ruleDecks").value) $("ruleDecks").value = "6";
+      applyRulesFromUI();
+      showToast(`Preset betöltve: ${dealer17} • 3:2 • late surrender • Double ANY • DAS on`);
+    };
+    const pH17 = document.getElementById("presetH17");
+    const pS17 = document.getElementById("presetS17");
+    if(pH17) pH17.addEventListener("click", ()=>applyPreset("H17"));
+    if(pS17) pS17.addEventListener("click", ()=>applyPreset("S17"));
+
     // Bet UI (local-only)
     const syncBetCustomUI = ()=>{
       const wrap = $("betCustomWrap");

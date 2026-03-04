@@ -301,6 +301,11 @@
 
     const ctx = { total: base.total, up: base.up, soft: base.soft, dealer17: rules.dealer17 };
 
+    // Extra clarity notes for common confusion cases
+    if(!base.soft && base.total === 12 && [4,5,6].includes(base.up)){
+      notes.push("Megj.: Hard 12 vs 4–6 → STAND (a dealer gyakran bustol). A running count (RC) nem döntési küszöb; a deviációk True Count (TC) alapján vannak.");
+    }
+
     for(const d of deviations){
       if(!d.action) continue;
       if(!d.when(tc)) continue;
