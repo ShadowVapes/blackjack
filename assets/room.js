@@ -291,6 +291,7 @@
       return id;
     }catch(_e){ return randId(10); }
   })();
+  const joinTs = Date.now();
 
   let helloTimer = null;
 
@@ -313,10 +314,16 @@
     if(source === "host" && typeof partial.activeHand === "number") state.activeHand = partial.activeHand;
     if(source === "dealer" && partial.dealer) state.dealer = partial.dealer;
 
-    if(source === "any" || source === "snapshot"){
+    if(source === "any"){
       if(partial.hands) state.hands = partial.hands;
       if(typeof partial.activeHand === "number") state.activeHand = partial.activeHand;
       if(partial.dealer) state.dealer = partial.dealer;
+    }
+
+    if(source === "snapshot"){
+      if(partial.hands) state.hands = partial.hands;
+      if(typeof partial.activeHand === "number") state.activeHand = partial.activeHand;
+      // dealer is NOT applied from host snapshot to avoid flicker/desync
     }
 
     if(Array.isArray(partial.seen)) state.seen = partial.seen;
@@ -348,7 +355,6 @@
       seen: state.seen,
       hands: state.hands,
       activeHand: state.activeHand,
-      dealer: state.dealer
     };
     sbChannel.send({
       type: "broadcast",
@@ -431,7 +437,7 @@
           rtStatus("online");
 
           // Track presence with our role
-          try{ await sbChannel.track({ role: state.role, ts: Date.now() }); }catch(_e){}
+          try{ await sbChannel.track({ role: state.role, want: state.roleWanted, ts: joinTs }); }catch(_e){}
 
           // Send initial patches so late-joiners still see something even before snapshot
           if(state.role === "host"){
@@ -479,41 +485,55 @@
 
   function updateRoleFromPresence(){
     if(state.mode !== "multi") return;
-    let roles = [];
-    for(const k of Object.keys(presence)){
-      const arr = presence[k];
-      if(Array.isArray(arr)){
-        for(const p of arr){
-          if(p && p.role) roles.push(p.role);
-        }
-      }
+
+    // Build stable participant list from presence
+    const entries = [];
+    for(const cid of Object.keys(presence)){
+      const arr = presence[cid];
+      if(!Array.isArray(arr) || !arr[0]) continue;
+      const p = arr[0] || {};
+      entries.push({
+        id: cid,
+        want: p.want || "auto",
+        ts: Number(p.ts) || 0
+      });
     }
-    const want = state.roleWanted;
-    const hostTaken = roles.includes("host");
-    const dealerTaken = roles.includes("dealer");
+    if(entries.length === 0) return;
 
-    let newRole = state.role;
-    if(want === "host" && !hostTaken) newRole = "host";
-    else if(want === "dealer" && !dealerTaken) newRole = "dealer";
-    else if(!hostTaken) newRole = "host";
-    else if(!dealerTaken) newRole = "dealer";
-    else newRole = "spectator";
+    // Sort by join timestamp (then id) to avoid role flip-flop
+    entries.sort((a,b)=>{
+      const dt = (a.ts - b.ts);
+      if(dt !== 0) return dt;
+      return a.id < b.id ? -1 : (a.id > b.id ? 1 : 0);
+    });
 
-    if(newRole !== state.role){
-      state.role = newRole;
+    // Decide host (prefer someone who wants host, otherwise first joiner)
+    let hostId = entries.find(e=>e.want === "host")?.id || entries[0].id;
+
+    // Decide dealer (prefer someone who wants dealer, otherwise next joiner)
+    let dealerId = entries.find(e=>e.id !== hostId && e.want === "dealer")?.id
+                || entries.find(e=>e.id !== hostId)?.id
+                || null;
+
+    const desiredRole = (clientId === hostId) ? "host"
+                       : (dealerId && clientId === dealerId) ? "dealer"
+                       : "spectator";
+
+    if(desiredRole !== state.role){
+      state.role = desiredRole;
       renderRole();
-      try{ sbChannel && sbChannel.track({ role: state.role, ts: Date.now() }); }catch(_e){}
+      try{ sbChannel && sbChannel.track({ role: state.role, want: state.roleWanted, ts: joinTs }); }catch(_e){}
       // After role changes, re-announce
       scheduleHello();
-      // And send authoritative snapshot if you became host
+      // Send authoritative snapshot/patch if you became host/dealer
       if(state.role === "host"){
         sendSnapshot("*");
-      }
-      if(state.role === "dealer"){
+      } else if(state.role === "dealer"){
         sendDealerPatch("*");
       }
     }
   }
+
 // ---- UI helpers ----
 
   function ensureHands(){
