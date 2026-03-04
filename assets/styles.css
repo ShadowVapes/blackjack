@@ -164,7 +164,7 @@ input:focus, select:focus{border-color:rgba(124,92,255,.55);box-shadow:0 0 0 3px
   margin:10px 0 12px;
 }
 .recTitle{font-weight:900;font-size:16px}
-.recDetail{font-size:12px;margin-top:6px}
+.recDetail{font-size:12px;margin-top:6px;white-space:pre-line}
 
 .seen{display:flex;gap:10px;flex-wrap:wrap;min-height:92px}
 

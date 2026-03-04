@@ -84,6 +84,108 @@
     round: 0           // 0/10/100/1000 (round DOWN)
   };
 
+  // EV-solver (exact EV) settings - LOCAL ONLY (not synced)
+  let solverSettings = {
+    enabled: true,
+    nodeLimit: 400000
+  };
+
+  function loadSolverSettings(){
+    try{
+      const raw = localStorage.getItem("bj_solver_settings");
+      if(!raw) return;
+      const o = JSON.parse(raw);
+      if(typeof o.enabled === "boolean") solverSettings.enabled = o.enabled;
+      if(typeof o.nodeLimit === "number") solverSettings.nodeLimit = o.nodeLimit;
+    }catch(_e){}
+  }
+  function saveSolverSettings(){
+    try{ localStorage.setItem("bj_solver_settings", JSON.stringify(solverSettings)); }catch(_e){}
+  }
+
+  let evWorker = null;
+  let evPendingKey = null;
+  let evReqId = 0;
+  const evCache = new Map();
+
+  const SOLVER_RANKS = ["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
+  const rankIdx = Object.fromEntries(SOLVER_RANKS.map((r,i)=>[r,i]));
+
+  function buildRemainingCounts(decks){
+    const counts = SOLVER_RANKS.map(()=>4*decks);
+    function dec(rank){
+      const r = String(rank);
+      const idx = rankIdx[r];
+      if(idx === undefined) return;
+      counts[idx] = Math.max(0, (counts[idx]||0) - 1);
+    }
+    // remove seen + all player cards + dealer upcard ONLY (decision-time info)
+    for(const c of state.seen) dec(c.rank);
+    for(const c of allPlayerCards()) dec(c.rank);
+    if(state.dealer && state.dealer[0]) dec(state.dealer[0].rank);
+    return counts;
+  }
+
+  function evKey(payload){
+    return JSON.stringify([
+      payload.counts,
+      payload.playerRanks,
+      payload.dealerUpRank,
+      payload.rules,
+      payload.fromSplit ? 1 : 0,
+      payload.handsUsed,
+      payload.nodeLimit
+    ]);
+  }
+
+  function ensureEvWorker(){
+    if(evWorker) return;
+    try{
+      evWorker = new Worker("./assets/exact_solver_worker.js");
+      evWorker.onmessage = (e)=>{
+        const res = e.data || {};
+        const key = res.__key;
+        if(!key) return;
+        evCache.set(key, res);
+        if(evPendingKey === key) evPendingKey = null;
+        // re-render to show results
+        renderAll();
+      };
+    }catch(err){
+      console.warn("EV worker init failed", err);
+      evWorker = null;
+    }
+  }
+
+  function requestEV(payload){
+    ensureEvWorker();
+    if(!evWorker) return null;
+    const key = evKey(payload);
+    if(evCache.has(key)) return evCache.get(key);
+    if(evPendingKey === key) return null;
+    evPendingKey = key;
+    evReqId += 1;
+    payload.__reqId = evReqId;
+    payload.__key = key;
+    evWorker.postMessage(payload);
+    return null;
+  }
+
+  function fmtEV(v){
+    if(v === undefined || v === null || !Number.isFinite(v)) return "—";
+    return (v >= 0 ? "+" : "") + v.toFixed(4);
+  }
+  function formatEVList(evs){
+    const order = ["STAND","HIT","DOUBLE","SPLIT","SURRENDER"];
+    const lines = [];
+    for(const a of order){
+      if(evs && Object.prototype.hasOwnProperty.call(evs, a)){
+        lines.push(`${a}: ${fmtEV(evs[a])}`);
+      }
+    }
+    return lines.join("\n");
+  }
+
   function loadBetSettings(){
     try{
       const raw = localStorage.getItem("bj_bet_settings");
@@ -562,7 +664,61 @@ function pickToCard(which, pick){
       splitA: state.rules.splitA
     };
 
-    const rec = window.BJStrategy.recommend(activeHand(), state.dealer, rules, tc);
+    const baseRec = window.BJStrategy.recommend(activeHand(), state.dealer, rules, tc);
+    let rec = { ...baseRec, _provisional: false };
+
+    // EV-solver: exact EV from remaining shoe (decision-time info: dealer upcard only)
+    const useSolverEl = $("useSolver");
+    const solverOn = !!solverSettings.enabled && (!useSolverEl || !!useSolverEl.checked);
+    const solverStatusEl = $("solverStatus");
+    const evOutEl = $("evOut");
+    const evHintEl = $("evHint");
+
+    if(solverOn && state.dealer && state.dealer[0] && activeHand().length){
+      const payload = {
+        counts: buildRemainingCounts(decks),
+        playerRanks: activeHand().map(c=>c.rank),
+        dealerUpRank: state.dealer[0].rank,
+        rules,
+        fromSplit: state.hands.length > 1,
+        handsUsed: state.hands.length,
+        nodeLimit: solverSettings.nodeLimit
+      };
+      const key = evKey(payload);
+      let evRes = evCache.get(key);
+      if(!evRes) evRes = requestEV(payload);
+
+      if(evRes && evRes.ok){
+        const mode = evRes.exact ? "EXACT" : "APPROX";
+        const evLines = formatEVList(evRes.evs);
+        rec.action = evRes.best;
+        rec.title = `AJÁNLÁS: ${evRes.best}`;
+        rec.detail =
+          `EV-solver: ${mode} • nodes: ${evRes.nodes||0}${evRes.note?` • ${evRes.note}`:""}\n` +
+          `${evLines || "—"}\n\n` +
+          `Basic (tábla) összevetés: ${baseRec.action || "—"}\n` +
+          `${baseRec.detail || ""}`;
+
+        if(solverStatusEl) solverStatusEl.textContent = `${mode.toLowerCase()} • ${evRes.nodes||0}`;
+        if(evOutEl) evOutEl.textContent = evLines || "—";
+        if(evHintEl) evHintEl.textContent = `(${mode.toLowerCase()})`;
+        rec._provisional = false;
+      } else if(evRes && evRes.ok === false){
+        rec._provisional = true;
+        if(solverStatusEl) solverStatusEl.textContent = "hiba";
+        if(evOutEl) evOutEl.textContent = (evRes.error || "solver error");
+        if(evHintEl) evHintEl.textContent = "";
+      } else {
+        rec._provisional = true;
+        if(solverStatusEl) solverStatusEl.textContent = (evPendingKey === key) ? "számol…" : "—";
+        if(evOutEl) evOutEl.textContent = "számol…";
+        if(evHintEl) evHintEl.textContent = "";
+      }
+    } else {
+      if(solverStatusEl) solverStatusEl.textContent = solverOn ? "add lapot…" : "off";
+      if(evOutEl) evOutEl.textContent = "—";
+      if(evHintEl) evHintEl.textContent = "";
+    }
 
     const box = $("recBox");
     box.querySelector(".recTitle").textContent = rec.title || "—";
@@ -664,6 +820,7 @@ function pickToCard(which, pick){
     __bj_inited = true;
     loadPersist();
     loadBetSettings();
+    loadSolverSettings();
 
     const h = parseHash();
     state.mode = (h.mode === "multi") ? "multi" : "single";
@@ -841,6 +998,20 @@ $("btnAuto").addEventListener("click", applyAuto);
       $("betRound").addEventListener("change", ()=>{
         betSettings.round = parseInt($("betRound").value,10) || 0;
         saveBetSettings();
+        renderAll();
+      });
+    }
+
+
+    // EV-solver UI
+    const useSolver = $("useSolver");
+    if(useSolver){
+      useSolver.checked = !!solverSettings.enabled;
+      useSolver.addEventListener("change", ()=>{
+        solverSettings.enabled = !!useSolver.checked;
+        saveSolverSettings();
+        // clear pending so it recalculates
+        evPendingKey = null;
         renderAll();
       });
     }

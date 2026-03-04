@@ -268,6 +268,20 @@
               </div>
 
               <p class="muted small" style="margin:6px 0 0">Megj.: még tökéletes döntésekkel is lehet nagy bukó sorozat (variancia). Ez csak matematikai várható érték szerinti skála.</p>
+            <div class="row-between" style="margin:8px 0 10px; gap:8px; align-items:center;">
+              <label class="muted small" style="display:flex; gap:8px; align-items:center;">
+                <input type="checkbox" id="useSolver" checked>
+                EV-solver (legpontosabb, EV max)
+                <span class="helpIcon" title="EV-solver: az aktuális handhez kiszámolja az összes lehetséges húzást a maradék cipőből, és a legnagyobb EV-t ajánlja. Ha túl nagy a fa, automatikus gyors (approx) módra vált. Split EV közelítés lehet.">i</span>
+              </label>
+              <span class="muted small mono" id="solverStatus">—</span>
+            </div>
+
+            <details id="evDetails" style="margin:0 0 8px;">
+              <summary><b>EV-k (solver)</b> <span class="muted small" id="evHint"></span></summary>
+              <div class="muted small mono" id="evOut" style="white-space:pre-line; margin-top:8px;">—</div>
+            </details>
+
             </div>
 
             <div class="rec" id="recBox">
