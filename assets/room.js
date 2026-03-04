@@ -275,19 +275,31 @@
     }catch(_e){}
   }
 
+  
   // ---- Realtime ----
   let sbClient = null;
   let sbChannel = null;
   let presence = {};
   let rtReady = false;
 
+  // Stable client id (so Presence doesn't duplicate you on reconnect)
+  const CLIENT_ID_KEY = "bj_rt_client_id";
+  const clientId = (()=>{
+    try{
+      let id = localStorage.getItem(CLIENT_ID_KEY);
+      if(!id){ id = randId(10); localStorage.setItem(CLIENT_ID_KEY, id); }
+      return id;
+    }catch(_e){ return randId(10); }
+  })();
+
+  let helloTimer = null;
+
   function rtStatus(text){ $("rtStatus").textContent = text; }
 
   function getSbConfig(){
-    return {
-      url: localStorage.getItem("bj_sb_url") || "",
-      key: localStorage.getItem("bj_sb_key") || ""
-    };
+    const url = (window.BJ_SUPABASE_URL || "").trim() || (localStorage.getItem("bj_sb_url") || "");
+    const key = (window.BJ_SUPABASE_ANON_KEY || "").trim() || (localStorage.getItem("bj_sb_key") || "");
+    return { url, key };
   }
   function setSbConfig(url,key){
     localStorage.setItem("bj_sb_url", url);
@@ -301,7 +313,7 @@
     if(source === "host" && typeof partial.activeHand === "number") state.activeHand = partial.activeHand;
     if(source === "dealer" && partial.dealer) state.dealer = partial.dealer;
 
-    if(source === "any"){
+    if(source === "any" || source === "snapshot"){
       if(partial.hands) state.hands = partial.hands;
       if(typeof partial.activeHand === "number") state.activeHand = partial.activeHand;
       if(partial.dealer) state.dealer = partial.dealer;
@@ -310,10 +322,54 @@
     if(Array.isArray(partial.seen)) state.seen = partial.seen;
   }
 
+  function scheduleHello(){
+    if(helloTimer) clearTimeout(helloTimer);
+    helloTimer = setTimeout(()=>{
+      if(!sbChannel || !rtReady) return;
+      sbChannel.send({
+        type: "broadcast",
+        event: "hello",
+        payload: {
+          from: clientId,
+          role: state.role,
+          want: state.roleWanted,
+          room: state.roomId,
+          ts: Date.now()
+        }
+      });
+    }, 120);
+  }
+
+  function sendSnapshot(to){
+    if(!sbChannel || !rtReady) return;
+    // Host is authoritative for rules/seen/hands; dealer for dealer cards.
+    const snap = {
+      rules: state.rules,
+      seen: state.seen,
+      hands: state.hands,
+      activeHand: state.activeHand,
+      dealer: state.dealer
+    };
+    sbChannel.send({
+      type: "broadcast",
+      event: "snapshot",
+      payload: { from: clientId, to, snap, ts: Date.now() }
+    });
+  }
+
+  function sendDealerPatch(to){
+    if(!sbChannel || !rtReady) return;
+    sbChannel.send({
+      type: "broadcast",
+      event: "dealer_snapshot",
+      payload: { from: clientId, to, dealer: state.dealer, ts: Date.now() }
+    });
+  }
+
   async function rtConnect(){
     const {url,key} = getSbConfig();
     if(!url || !key){
-      showToast("Supabase kulcs hiányzik – offline mód");
+      showToast("Supabase URL/anon key hiányzik – offline mód");
       return;
     }
     const roomId = state.roomId;
@@ -321,12 +377,13 @@
       showToast("Adj meg Room ID-t");
       return;
     }
+
     try{
       rtStatus("connecting…");
       sbClient = await window.SBRT.createClient(url, key);
 
       sbChannel = sbClient.channel("bj-room-"+roomId, {
-        config: { presence: { key: randId(10) } }
+        config: { presence: { key: clientId } }
       });
 
       sbChannel
@@ -335,18 +392,48 @@
           mergePartial(msg.patch || {}, msg.role || "any");
           renderAll();
         })
+        .on("broadcast", { event: "hello" }, ({payload})=>{
+          const p = payload || {};
+          if(!p.from || p.from === clientId) return;
+          // If I'm host -> send full snapshot to the joiner.
+          if(state.role === "host"){
+            sendSnapshot(p.from);
+          }
+          // If I'm dealer -> send dealer cards to the joiner.
+          if(state.role === "dealer"){
+            sendDealerPatch(p.from);
+          }
+        })
+        .on("broadcast", { event: "snapshot" }, ({payload})=>{
+          const p = payload || {};
+          if(!p.to || (p.to !== clientId && p.to !== "*")) return;
+          if(!p.snap) return;
+          mergePartial(p.snap, "snapshot");
+          renderAll();
+          showToast("Szinkron kész (snapshot)");
+        })
+        .on("broadcast", { event: "dealer_snapshot" }, ({payload})=>{
+          const p = payload || {};
+          if(!p.to || (p.to !== clientId && p.to !== "*")) return;
+          if(!Array.isArray(p.dealer)) return;
+          mergePartial({ dealer: p.dealer }, "dealer");
+          renderAll();
+        })
         .on("presence", { event: "sync" }, ()=>{
           presence = sbChannel.presenceState() || {};
           updateRoleFromPresence();
+          scheduleHello();
         });
 
       await sbChannel.subscribe(async (status)=>{
         if(status === "SUBSCRIBED"){
           rtReady = true;
           rtStatus("online");
-          await sbChannel.track({ role: state.role, ts: Date.now() });
 
-          // Send initial patches
+          // Track presence with our role
+          try{ await sbChannel.track({ role: state.role, ts: Date.now() }); }catch(_e){}
+
+          // Send initial patches so late-joiners still see something even before snapshot
           if(state.role === "host"){
             rtBroadcast({ hands: state.hands, activeHand: state.activeHand, rules: state.rules, seen: state.seen }, "host");
           } else if(state.role === "dealer"){
@@ -354,12 +441,18 @@
           } else {
             rtBroadcast({ rules: state.rules, seen: state.seen }, "any");
           }
+
+          // Ask for snapshot
+          scheduleHello();
         }
       });
     }catch(e){
       console.error(e);
       rtStatus("offline");
       showToast("Realtime hiba – offline");
+      rtReady = false;
+      sbChannel = null;
+      sbClient = null;
     }
   }
 
@@ -380,7 +473,7 @@
     sbChannel.send({
       type: "broadcast",
       event: "patch",
-      payload: { role, patch }
+      payload: { role, patch, from: clientId, ts: Date.now() }
     });
   }
 
@@ -409,11 +502,19 @@
     if(newRole !== state.role){
       state.role = newRole;
       renderRole();
-      try{ sbChannel.track({ role: state.role, ts: Date.now() }); }catch(_e){}
+      try{ sbChannel && sbChannel.track({ role: state.role, ts: Date.now() }); }catch(_e){}
+      // After role changes, re-announce
+      scheduleHello();
+      // And send authoritative snapshot if you became host
+      if(state.role === "host"){
+        sendSnapshot("*");
+      }
+      if(state.role === "dealer"){
+        sendDealerPatch("*");
+      }
     }
   }
-
-  // ---- UI helpers ----
+// ---- UI helpers ----
 
   function ensureHands(){
     if(!Array.isArray(state.hands) || state.hands.length === 0) state.hands = [[]];
@@ -1112,6 +1213,14 @@ $("btnAuto").addEventListener("click", applyAuto);
 
     renderLinks();
     renderAll();
+
+    // Auto-connect Realtime if room is multi and config is present
+    try{
+      const cfg2 = getSbConfig();
+      if(state.mode === 'multi' && state.roomId && cfg2.url && cfg2.key){
+        rtConnect();
+      }
+    }catch(_e){}
   }
   document.addEventListener("DOMContentLoaded", init);
 })();
