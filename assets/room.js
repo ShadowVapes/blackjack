@@ -59,6 +59,9 @@
       role: "single",
       rules: {
         decks: 6,
+        // shoeDecks is the CURRENT shoe capacity (auto-extends when depleted)
+        // decks is the base starting decks selected by the user.
+        shoeDecks: 6,
         dealer17: "S17",
         bjPay: "3:2",
         surrender: "late",
@@ -110,6 +113,54 @@
 
   const SOLVER_RANKS = ["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
   const rankIdx = Object.fromEntries(SOLVER_RANKS.map((r,i)=>[r,i]));
+
+  function shoeDecks(){
+    // current shoe size (may be larger than base decks if we had to extend)
+    const d = Number(state.rules.shoeDecks ?? state.rules.decks ?? 6);
+    return Number.isFinite(d) && d > 0 ? d : 6;
+  }
+
+  function baseDecks(){
+    const d = Number(state.rules.decks ?? 6);
+    return Number.isFinite(d) && d > 0 ? d : 6;
+  }
+
+  function usedRankCounts(){
+    const m = Object.fromEntries(SOLVER_RANKS.map(r=>[r,0]));
+    for(const c of state.seen) if(m[c.rank] !== undefined) m[c.rank] += 1;
+    for(const c of allPlayerCards()) if(m[c.rank] !== undefined) m[c.rank] += 1;
+    for(const c of state.dealer) if(m[c.rank] !== undefined) m[c.rank] += 1;
+    return m;
+  }
+
+  function ensureShoeHasRank(rank){
+    const r = String(rank);
+    if(rankIdx[r] === undefined) return 0;
+    const used = usedRankCounts();
+    const usedR = used[r] || 0;
+    const d = shoeDecks();
+    const rem = (4 * d) - usedR;
+    if(rem >= 1) return 0;
+
+    // Need to add decks until we have at least 1 card of that rank remaining.
+    const deficit = (usedR - (4 * d)) + 1; // how many cards short we are
+    const add = Math.max(1, Math.ceil(deficit / 4));
+    state.rules.shoeDecks = d + add;
+    return add;
+  }
+
+  function normalizeShoeDecks(){
+    // Ensure shoeDecks is large enough for already-entered cards.
+    const used = usedRankCounts();
+    let need = baseDecks();
+    for(const r of SOLVER_RANKS){
+      const u = used[r] || 0;
+      need = Math.max(need, Math.ceil(u / 4));
+    }
+    if(!Number.isFinite(state.rules.shoeDecks) || state.rules.shoeDecks < need){
+      state.rules.shoeDecks = need;
+    }
+  }
 
   function buildRemainingCounts(decks){
     const counts = SOLVER_RANKS.map(()=>4*decks);
@@ -673,6 +724,16 @@ function pickToCard(which, pick){
   }
 
   function addCardTo(listName, card){
+    // Auto-extend shoe when depleted.
+    // If the requested rank has no remaining copies, we add +1 (or more) full decks.
+    const added = ensureShoeHasRank(card.rank);
+    if(added > 0){
+      showToast(`Elfogyott a lap → +${added} pakli (össz: ${shoeDecks()})`);
+      // Keep all clients consistent.
+      if(state.mode === "multi" && rtReady){
+        rtBroadcast({ rules: state.rules }, "any");
+      }
+    }
     if(listName === "player"){
       ensureHands();
       activeHand().push(card);
@@ -727,7 +788,8 @@ function pickToCard(which, pick){
   }
 
   function compute(){
-    const decks = parseInt(state.rules.decks,10) || 6;
+    normalizeShoeDecks();
+    const decks = shoeDecks();
     ensureHands();
     const dealt = [...state.seen, ...allPlayerCards(), ...state.dealer];
     const rc = window.BJCount.runningCount(dealt);
@@ -754,7 +816,7 @@ function pickToCard(which, pick){
       $("betOut").textContent = bet ? `${bet.toLocaleString('hu-HU')}  (${units}u)` : `0  (${units}u)`;
     }
     if($("betMeta")){
-      $("betMeta").textContent = `shoe RC: ${rcShoe} • shoe TC: ${tcShoe.toFixed(2)} • cap: ${cap}u`;
+      $("betMeta").textContent = `shoe RC: ${rcShoe} • shoe TC: ${tcShoe.toFixed(2)} • cap: ${cap}u • shoe pakli: ${shoeDecks()} (alap: ${baseDecks()})`;
     }
 
     const pTotal = window.BJStrategy.handTotal(activeHand());
@@ -890,7 +952,10 @@ function pickToCard(which, pick){
   }
 
   function applyRulesFromUI(){
-    state.rules.decks = parseInt($("ruleDecks").value,10);
+    const newBase = parseInt($("ruleDecks").value,10);
+    state.rules.decks = newBase;
+    // When user changes deck count, treat it as a new shoe configuration.
+    state.rules.shoeDecks = Number.isFinite(newBase) && newBase > 0 ? newBase : 6;
     state.rules.dealer17 = $("ruleDealer17").value;
     state.rules.bjPay = $("ruleBjPay").value;
     state.rules.surrender = $("ruleSurrender").value;
@@ -931,6 +996,8 @@ function pickToCard(which, pick){
     if(typeof obj.activeHand === "number") state.activeHand = obj.activeHand;
     if(Array.isArray(obj.dealer)) state.dealer = obj.dealer;
     if(Array.isArray(obj.seen)) state.seen = obj.seen;
+    // ensure shoeDecks is consistent with imported cards
+    normalizeShoeDecks();
     renderAll();
   }
 
@@ -1045,8 +1112,10 @@ function pickToCard(which, pick){
 });
     $("btnResetShoe").addEventListener("click", ()=>{
       state.seen = [];
+      // Reset shoe capacity back to base decks
+      state.rules.shoeDecks = baseDecks();
       renderAll();
-      if(state.mode === "multi" && rtReady) rtBroadcast({ seen: [] }, "any");
+      if(state.mode === "multi" && rtReady) rtBroadcast({ seen: [], rules: state.rules }, "any");
       showToast("Cipő reset");
     });
 $("btnAuto").addEventListener("click", applyAuto);
