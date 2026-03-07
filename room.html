@@ -177,6 +177,8 @@
               <div class="handTabs" id="handTabs"></div>
               <div class="row" style="gap:8px;">
                 <button class="btn ghost small" id="btnSplitHand" type="button">Split / +Kéz</button>
+                <button class="btn ghost small" id="btnToggleDouble" type="button" title="Double jelölés + bet">Double</button>
+                <button class="btn ghost small" id="btnToggleSurrender" type="button" title="Surrender jelölés">Surrender</button>
                 <button class="btn ghost small" id="btnRemoveHand" type="button">Kéz −</button>
               </div>
             </div>
@@ -242,6 +244,56 @@
                   <div class="kpiTitle">Ajánlott tét (köv. kör)</div>
                   <div class="kpiVal mono" id="betOut">—</div>
                   <div class="muted small" id="betMeta">—</div>
+
+                  <div class="bankPanel" style="margin-top:10px;">
+                    <div class="row-between" style="gap:10px; align-items:flex-end;">
+                      <div>
+                        <div class="kpiTitle">Bankroll</div>
+                        <div class="kpiVal mono" id="bankOut">—</div>
+                        <div class="muted small" id="bankMeta">—</div>
+                      </div>
+                    </div>
+
+                    <div class="gridRules betGrid" style="margin-top:10px;">
+                      <div class="field">
+                        <label>Kezdő pénz</label>
+                        <input id="bankStart" type="number" min="0" step="1" placeholder="pl. 100000"/>
+                      </div>
+                      <div class="field">
+                        <label>Fogadás (aktuális kör)</label>
+                        <input id="roundBet" type="number" min="0" step="1" placeholder="pl. 1000"/>
+                      </div>
+                    </div>
+
+                    <div class="row" style="margin-top:8px;">
+                      <button class="btn ghost small" id="btnBankSet" type="button">Bankroll beállít</button>
+                      <button class="btn ghost small" id="btnBankReset" type="button">Reset bankroll</button>
+                      <button class="btn small" id="btnUseRecBet" type="button">Fogadás = ajánlott</button>
+                      <button class="btn small" id="btnStartRound" type="button">Kör indít (bet)</button>
+                      <button class="btn ghost small" id="btnCancelRound" type="button">Kör törlés (refund)</button>
+                    </div>
+
+                    <div class="gridRules betGrid" style="margin-top:8px;">
+                      <div class="field">
+                        <label>Reserve (hogy férjen a DOUBLE/SPLIT)</label>
+                        <select id="reserveMode">
+                          <option value="1">nincs (1x)</option>
+                          <option value="2">DOUBLE-hoz (2x)</option>
+                          <option value="4" selected>SPLIT+DOUBLE (4x)</option>
+                          <option value="max">max hands + double (2×max)</option>
+                        </select>
+                      </div>
+                      <div class="field">
+                        <label>Megj.: tétet cap-eli bankrollhoz</label>
+                        <select id="bankCap">
+                          <option value="on" selected>on</option>
+                          <option value="off">off</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div class="muted small" style="margin-top:6px;">Tipp: a "Kör indít" levonja a tétet a rendelkezésre álló pénzből. DOUBLE/SPLIT akkor engedett, ha van rá fedezet.</div>
+                  </div>
                 </div>
               </div>
 

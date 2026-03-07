@@ -90,6 +90,296 @@
     round: 0           // 0/10/100/1000 (round DOWN)
   };
 
+  // Bankroll (LOCAL ONLY, not synced to room).
+  // Model: balance = available cash, committed = stakes currently on the table for this round.
+  // When you start a round (bet), it moves from balance -> committed. Split/Double also move additional stake.
+  // On resolve (Next Round), payouts are added back to balance and committed resets to 0.
+  let bank = {
+    start: 100000,
+    balance: 100000,
+    committed: 0,
+    inRound: false,
+    baseBet: 0,
+    stakes: [0],
+    doubled: [false],
+    surrendered: [false],
+  };
+
+  let bankSettings = {
+    capToBankroll: true,
+    reserveMode: '4', // '1'|'2'|'4'|'max'
+  };
+
+  function clampMoney(x){
+    const n = Number(x);
+    return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+  }
+
+  function loadBank(){
+    try{
+      const raw = localStorage.getItem('bj_bankroll');
+      if(raw){
+        const o = JSON.parse(raw);
+        if(typeof o.start==='number') bank.start = o.start;
+        if(typeof o.balance==='number') bank.balance = o.balance;
+        if(typeof o.committed==='number') bank.committed = o.committed;
+        if(typeof o.inRound==='boolean') bank.inRound = o.inRound;
+        if(typeof o.baseBet==='number') bank.baseBet = o.baseBet;
+        if(Array.isArray(o.stakes)) bank.stakes = o.stakes;
+        if(Array.isArray(o.doubled)) bank.doubled = o.doubled;
+        if(Array.isArray(o.surrendered)) bank.surrendered = o.surrendered;
+      }
+      const raw2 = localStorage.getItem('bj_bank_settings');
+      if(raw2){
+        const s = JSON.parse(raw2);
+        if(typeof s.capToBankroll==='boolean') bankSettings.capToBankroll = s.capToBankroll;
+        if(typeof s.reserveMode==='string') bankSettings.reserveMode = s.reserveMode;
+      }
+    }catch(_e){}
+
+    if(!Array.isArray(bank.stakes) || bank.stakes.length===0) bank.stakes=[0];
+    if(!Array.isArray(bank.doubled) || bank.doubled.length!==bank.stakes.length) bank.doubled = bank.stakes.map(()=>false);
+    if(!Array.isArray(bank.surrendered) || bank.surrendered.length!==bank.stakes.length) bank.surrendered = bank.stakes.map(()=>false);
+  }
+
+  function saveBank(){
+    try{ localStorage.setItem('bj_bankroll', JSON.stringify(bank)); }catch(_e){}
+    try{ localStorage.setItem('bj_bank_settings', JSON.stringify(bankSettings)); }catch(_e){}
+  }
+
+  function bankTotal(){
+    return clampMoney(bank.balance) + clampMoney(bank.committed);
+  }
+
+  function exposureFactor(){
+    const maxHands = parseInt(state.rules.maxHands,10) || 4;
+    if(bankSettings.reserveMode === 'max') return Math.max(1, 2 * maxHands);
+    const n = parseInt(bankSettings.reserveMode,10);
+    return Number.isFinite(n) && n>0 ? n : 4;
+  }
+
+  function ensureBankArrays(){
+    ensureHands();
+    const n = state.hands.length;
+    if(!Array.isArray(bank.stakes)) bank.stakes = [];
+    if(!Array.isArray(bank.doubled)) bank.doubled = [];
+    if(!Array.isArray(bank.surrendered)) bank.surrendered = [];
+    while(bank.stakes.length < n) bank.stakes.push(0);
+    while(bank.doubled.length < n) bank.doubled.push(false);
+    while(bank.surrendered.length < n) bank.surrendered.push(false);
+    bank.stakes = bank.stakes.slice(0, n);
+    bank.doubled = bank.doubled.slice(0, n);
+    bank.surrendered = bank.surrendered.slice(0, n);
+  }
+
+  function updateBankUI(){
+    const out = $('bankOut');
+    const meta = $('bankMeta');
+    if(!out || !meta) return;
+    const bal = clampMoney(bank.balance);
+    const com = clampMoney(bank.committed);
+    const tot = bal + com;
+    out.textContent = 'Avail: ' + bal.toLocaleString('hu-HU') + ' • In play: ' + com.toLocaleString('hu-HU') + ' • Total: ' + tot.toLocaleString('hu-HU');
+    meta.textContent = bank.inRound
+      ? ('Kör: aktív • base bet: ' + clampMoney(bank.baseBet).toLocaleString('hu-HU') + ' • hands: ' + state.hands.length)
+      : 'Kör: nincs bet lockolva';
+  }
+
+  function bankSetStart(val){
+    const v = clampMoney(val);
+    bank.start = v;
+    bank.balance = v;
+    bank.committed = 0;
+    bank.inRound = false;
+    bank.baseBet = 0;
+    bank.stakes = [0];
+    bank.doubled = [false];
+    bank.surrendered = [false];
+    saveBank();
+    updateBankUI();
+  }
+
+  function bankRefundAll(){
+    bank.balance = clampMoney(bank.balance) + clampMoney(bank.committed);
+    bank.committed = 0;
+    bank.inRound = false;
+    bank.baseBet = 0;
+    ensureHands();
+    bank.stakes = state.hands.map(()=>0);
+    bank.doubled = state.hands.map(()=>false);
+    bank.surrendered = state.hands.map(()=>false);
+    saveBank();
+    updateBankUI();
+  }
+
+  function bankStartRound(bet){
+    ensureBankArrays();
+    const b = clampMoney(bet);
+    if(b<=0){ showToast('Adj meg fogadást'); return false; }
+    if(bank.inRound){ showToast('A kör már elindult'); return true; }
+    const need = b * state.hands.length;
+    if(clampMoney(bank.balance) < need){
+      showToast('Nincs elég pénz a bethez (kell ' + need + ')');
+      return false;
+    }
+    bank.baseBet = b;
+    bank.inRound = true;
+    bank.balance = clampMoney(bank.balance) - need;
+    bank.committed = clampMoney(bank.committed) + need;
+    bank.stakes = state.hands.map(()=>b);
+    bank.doubled = state.hands.map(()=>false);
+    bank.surrendered = state.hands.map(()=>false);
+    saveBank();
+    updateBankUI();
+    return true;
+  }
+
+  function bankAddHandStake(){
+    if(!bank.inRound) return true;
+    const b = clampMoney(bank.baseBet);
+    if(b<=0) return true;
+    if(clampMoney(bank.balance) < b){
+      showToast('Nincs fedezet +1 hand betre');
+      return false;
+    }
+    bank.balance = clampMoney(bank.balance) - b;
+    bank.committed = clampMoney(bank.committed) + b;
+    bank.stakes.push(b);
+    bank.doubled.push(false);
+    bank.surrendered.push(false);
+    saveBank();
+    updateBankUI();
+    return true;
+  }
+
+  function bankRemoveHandStake(idx){
+    ensureBankArrays();
+    const s = clampMoney(bank.stakes[idx]||0);
+    if(bank.inRound && s>0){
+      bank.balance = clampMoney(bank.balance) + s;
+      bank.committed = Math.max(0, clampMoney(bank.committed) - s);
+    }
+    bank.stakes.splice(idx,1);
+    bank.doubled.splice(idx,1);
+    bank.surrendered.splice(idx,1);
+    saveBank();
+    updateBankUI();
+  }
+
+  function bankToggleDouble(idx){
+    ensureBankArrays();
+    if(!bank.inRound){ showToast('Előbb indíts kört (bet)'); return; }
+    const stake = clampMoney(bank.stakes[idx]||0);
+    if(stake<=0){ showToast('Nincs stake ezen a handen'); return; }
+    if(bank.doubled[idx]){
+      // undo double: refund the extra half
+      const extra = Math.floor(stake/2);
+      bank.balance = clampMoney(bank.balance) + extra;
+      bank.committed = Math.max(0, clampMoney(bank.committed) - extra);
+      bank.stakes[idx] = extra;
+      bank.doubled[idx] = false;
+      saveBank();
+      updateBankUI();
+      showToast('Double visszavonva');
+      return;
+    }
+    if(clampMoney(bank.balance) < stake){
+      showToast('Nincs elég pénz a DOUBLE-hoz');
+      return;
+    }
+    bank.balance = clampMoney(bank.balance) - stake;
+    bank.committed = clampMoney(bank.committed) + stake;
+    bank.stakes[idx] = stake * 2;
+    bank.doubled[idx] = true;
+    saveBank();
+    updateBankUI();
+    showToast('Double jelölve');
+  }
+
+  function bankToggleSurrender(idx){
+    ensureBankArrays();
+    if(!bank.inRound){ showToast('Előbb indíts kört (bet)'); return; }
+    bank.surrendered[idx] = !bank.surrendered[idx];
+    saveBank();
+    updateBankUI();
+    showToast(bank.surrendered[idx] ? 'Surrender jelölve' : 'Surrender levéve');
+  }
+
+  function resolvePayouts(){
+    ensureHands();
+    ensureBankArrays();
+    if(!bank.inRound){
+      return { ok:false, msg:'Nincs aktív kör (bet nincs lockolva).' };
+    }
+    if(!state.dealer || state.dealer.length < 2){
+      return { ok:false, msg:'Adj meg a dealer lapjait (legalább 2), hogy lezárjuk a kört.' };
+    }
+
+    const dTotObj = window.BJStrategy.handTotal(state.dealer);
+    const dTotal = dTotObj.total;
+    const dealerBJ = (state.dealer.length===2 && dTotal===21);
+
+    const bjPay = (state.rules.bjPay === '6:5') ? 1.2 : 1.5;
+    let returned = 0;
+    const lines = [];
+
+    for(let i=0;i<state.hands.length;i++){
+      const hand = state.hands[i];
+      const meta = (state.hmeta && state.hmeta[i]) ? state.hmeta[i] : {fromSplit:false};
+      const stake = clampMoney(bank.stakes[i]||0);
+      const pObj = window.BJStrategy.handTotal(hand);
+      const pTotal = pObj.total;
+      const pBJ = (!meta.fromSplit) && hand.length===2 && pTotal===21;
+      const surrendered = !!bank.surrendered[i];
+
+      let add = 0;
+      let outcome = '';
+
+      if(stake<=0){
+        outcome = 'no-bet';
+        add = 0;
+      } else if(surrendered){
+        add = Math.floor(stake * 0.5);
+        outcome = 'surrender (-1/2)';
+      } else if(pTotal>21){
+        add = 0;
+        outcome = 'bust (lose)';
+      } else if(dealerBJ){
+        if(pBJ){ add = stake; outcome='push (BJ/BJ)'; }
+        else { add = 0; outcome='lose (dealer BJ)'; }
+      } else if(pBJ){
+        add = Math.floor(stake * (1 + bjPay));
+        outcome = 'blackjack (+' + bjPay + ')';
+      } else if(dTotal>21){
+        add = stake * 2;
+        outcome = 'win (dealer bust)';
+      } else {
+        if(pTotal > dTotal){ add = stake * 2; outcome='win'; }
+        else if(pTotal < dTotal){ add = 0; outcome='lose'; }
+        else { add = stake; outcome='push'; }
+      }
+
+      returned += add;
+      lines.push('Hand ' + (i+1) + ': stake ' + stake + ' → ' + outcome + ' | return ' + add);
+    }
+
+    const beforeTotal = bankTotal();
+    bank.balance = clampMoney(bank.balance) + returned;
+    bank.committed = 0;
+    bank.inRound = false;
+    bank.baseBet = 0;
+    bank.stakes = state.hands.map(()=>0);
+    bank.doubled = state.hands.map(()=>false);
+    bank.surrendered = state.hands.map(()=>false);
+    saveBank();
+    updateBankUI();
+
+    const afterTotal = bankTotal();
+    const net = afterTotal - beforeTotal;
+    return { ok:true, net, lines, beforeTotal, afterTotal, returned };
+  }
+
+
   // EV-solver (exact EV) settings - LOCAL ONLY (not synced)
   let solverSettings = {
     enabled: true,
@@ -308,6 +598,32 @@
     const s = Number(step)||0;
     if(s <= 0) return amount;
     return Math.floor(amount / s) * s;
+  }
+
+  function calcRecommendedBetNextRound(){
+    try{
+      normalizeShoeDecks();
+      const decks = shoeDecks();
+      const rcShoe = window.BJCount.runningCount(state.seen);
+      const remShoe = window.BJCount.remainingFromSeen(decks, state.seen.length);
+      const tcShoe = window.BJCount.trueCount(rcShoe, remShoe.remainingDecks);
+
+      const unitsRaw = betUnitsFromTC(tcShoe);
+      const cap = Math.max(1, parseInt(betSettings.cap,10) || 6);
+      const units = Math.min(cap, Math.max(1, unitsRaw));
+      const base = Math.max(0, parseFloat(betSettings.base) || 0);
+      let bet = roundDown(base * units, betSettings.round);
+
+      if(bankSettings && bankSettings.capToBankroll){
+        const totBank = bankTotal();
+        const factor = exposureFactor();
+        const maxBet = roundDown(Math.floor(totBank / factor), betSettings.round);
+        if(Number.isFinite(maxBet) && maxBet >= 0) bet = Math.min(bet, maxBet);
+      }
+      return clampMoney(bet);
+    }catch(_e){
+      return 0;
+    }
   }
 
   function loadPersist(){
@@ -703,6 +1019,7 @@ function renderHand(containerId, cards, canEdit, onRemoveAt){
 
   function renderHandTabs(){
     ensureHands();
+    ensureBankArrays();
     const tabs = $("handTabs");
     const hint = $("handHint");
     if(!tabs) return;
@@ -712,7 +1029,11 @@ function renderHand(containerId, cards, canEdit, onRemoveAt){
       btn.type = "button";
       btn.className = "handTab" + (i === state.activeHand ? " active" : "");
       const t = window.BJStrategy.handTotal(h);
-      const label = h.length ? `H${i+1} (${t.total}${t.soft?"s":""})` : `H${i+1}`;
+      const stake = clampMoney(bank.stakes[i]||0);
+      const fD = bank.doubled[i] ? ' D' : '';
+      const fR = bank.surrendered[i] ? ' R' : '';
+      const fS = (bank.inRound && stake>0) ? (' [' + stake.toLocaleString('hu-HU') + ']') : '';
+      const label = h.length ? `H${i+1} (${t.total}${t.soft?"s":""})${fD}${fR}${fS}` : `H${i+1}${fD}${fR}${fS}`;
       btn.textContent = label;
       btn.addEventListener("click", ()=>setActiveHand(i));
       tabs.appendChild(btn);
@@ -749,6 +1070,21 @@ function pickToCard(which, pick){
     }
     if(listName === "player"){
       ensureHands();
+      // auto-start round bet on first player card (so DOUBLE/SPLIT affordability is correct)
+      if(!bank.inRound){
+        const roundBetEl = $("roundBet");
+        let b = roundBetEl ? clampMoney(roundBetEl.value) : 0;
+        if(b <= 0) b = calcRecommendedBetNextRound();
+        if(roundBetEl) roundBetEl.value = String(b);
+        // try start; if fails (too big), fall back to capped recommended
+        if(!bankStartRound(b)){
+          const b2 = calcRecommendedBetNextRound();
+          if(b2>0 && b2 !== b){
+            if(roundBetEl) roundBetEl.value = String(b2);
+            bankStartRound(b2);
+          }
+        }
+      }
       activeHand().push(card);
       persist();
       renderAll();
@@ -817,7 +1153,26 @@ function pickToCard(which, pick){
     const cap = Math.max(1, parseInt(betSettings.cap,10) || 6);
     const units = Math.min(cap, Math.max(1, unitsRaw));
     const base = Math.max(0, parseFloat(betSettings.base) || 0);
-    const bet = roundDown(base * units, betSettings.round);
+    let bet = roundDown(base * units, betSettings.round);
+
+    // Bankroll-aware cap (optional): ensure suggested bet fits your bankroll reserve so DOUBLE/SPLIT is affordable.
+    let betCapInfo = '';
+    try{
+      const capOn = !!bankSettings.capToBankroll;
+      if(capOn){
+        const totBank = bankTotal();
+        const factor = exposureFactor();
+        const maxBet = roundDown(Math.floor(totBank / factor), betSettings.round);
+        if(Number.isFinite(maxBet) && maxBet >= 0){
+          if(bet > maxBet){
+            betCapInfo = ' • bankroll cap: ' + maxBet.toLocaleString('hu-HU') + ' (/' + factor + 'x)';
+            bet = maxBet;
+          } else {
+            betCapInfo = ' • bankroll ok (/' + factor + 'x)';
+          }
+        }
+      }
+    }catch(_e){}
 
     $("rcOut").textContent = String(rc);
     $("tcOut").textContent = tc.toFixed(2);
@@ -829,7 +1184,7 @@ function pickToCard(which, pick){
       $("betOut").textContent = bet ? `${bet.toLocaleString('hu-HU')}  (${units}u)` : `0  (${units}u)`;
     }
     if($("betMeta")){
-      $("betMeta").textContent = `shoe RC: ${rcShoe} • shoe TC: ${tcShoe.toFixed(2)} • cap: ${cap}u • shoe pakli: ${shoeDecks()} (alap: ${baseDecks()})`;
+      $("betMeta").textContent = `shoe RC: ${rcShoe} • shoe TC: ${tcShoe.toFixed(2)} • cap: ${cap}u • shoe pakli: ${shoeDecks()} (alap: ${baseDecks()})${betCapInfo} • bankroll total: ${bankTotal().toLocaleString('hu-HU')}`;
     }
 
     const pTotal = window.BJStrategy.handTotal(activeHand());
@@ -889,13 +1244,49 @@ function pickToCard(which, pick){
       if(evRes && evRes.ok){
         const mode = evRes.exact ? "EXACT" : "APPROX";
         const evLines = formatEVList(evRes.evs);
-        rec.action = evRes.best;
-        rec.title = `AJÁNLÁS: ${evRes.best}`;
+        let bestAction = evRes.best;
+        let bankrollNote = '';
+
+        // If bankroll is tracked and a bet is already on the table, filter out actions you cannot afford now.
+        try{
+          if(bank.inRound){
+            const aIdx = state.activeHand;
+            const needDouble = clampMoney(bank.stakes[aIdx]||0);
+            const canAffordDouble = needDouble>0 && clampMoney(bank.balance) >= needDouble;
+            const canAffordSplit = (clampMoney(bank.balance) >= clampMoney(bank.baseBet||0)) && (state.hands.length < (parseInt(state.rules.maxHands,10)||4));
+
+            const affordable = (a)=>{
+              if(a === 'DOUBLE') return canAffordDouble;
+              if(a === 'SPLIT') return canAffordSplit;
+              return true;
+            };
+
+            if(!affordable(bestAction) && evRes.evs){
+              // pick best affordable EV
+              let best = null;
+              let bestEv = -1e9;
+              for(const [act, ev] of Object.entries(evRes.evs)){
+                if(!affordable(act)) continue;
+                if(typeof ev !== 'number') continue;
+                if(ev > bestEv){ bestEv = ev; best = act; }
+              }
+              if(best){
+                bankrollNote = `
+
+⚠ Bankroll limit: ${bestAction} nem fér bele most → ${best}`;
+                bestAction = best;
+              }
+            }
+          }
+        }catch(_e){}
+
+        rec.action = bestAction;
+        rec.title = `AJÁNLÁS: ${bestAction}`;
         rec.detail =
           `EV-solver: ${mode} • nodes: ${evRes.nodes||0}${evRes.note?` • ${evRes.note}`:""}\n` +
           `${evLines || "—"}\n\n` +
           `Basic (tábla) összevetés: ${baseRec.action || "—"}\n` +
-          `${baseRec.detail || ""}`;
+          `${baseRec.detail || ""}` + bankrollNote;
 
         if(solverStatusEl) solverStatusEl.textContent = `${mode.toLowerCase()} • ${evRes.nodes||0}`;
         if(evOutEl) evOutEl.textContent = evLines || "—";
@@ -963,6 +1354,21 @@ function pickToCard(which, pick){
     if($("betCap")) $("betCap").value = String(betSettings.cap ?? 6);
     if($("betRound")) $("betRound").value = String(betSettings.round ?? 0);
     if($("betCustomWrap")) $("betCustomWrap").style.display = (betSettings.ramp === "custom") ? "block" : "none";
+    // bankroll UI (local)
+    if($("bankStart")) $("bankStart").value = String(bank.start ?? 0);
+    if($("roundBet")) $("roundBet").value = String(bank.inRound ? (bank.baseBet ?? 0) : (clampMoney($("roundBet").value) || 0));
+    if($("reserveMode")) $("reserveMode").value = bankSettings.reserveMode || '4';
+    if($("bankCap")) $("bankCap").value = bankSettings.capToBankroll ? 'on' : 'off';
+    updateBankUI();
+    // reflect per-hand markers on buttons
+    try{
+      ensureBankArrays();
+      const i = state.activeHand;
+      const bd = $("btnToggleDouble");
+      if(bd) bd.textContent = bank.doubled[i] ? "Double ✓" : "Double";
+      const bs = $("btnToggleSurrender");
+      if(bs) bs.textContent = bank.surrendered[i] ? "Surrender ✓" : "Surrender";
+    }catch(_e){}
 
     compute();
     persist();
@@ -1030,6 +1436,7 @@ function pickToCard(which, pick){
     loadPersist();
     loadBetSettings();
     loadSolverSettings();
+    loadBank();
 
     const h = parseHash();
     state.mode = (h.mode === "multi") ? "multi" : "single";
@@ -1076,12 +1483,25 @@ function pickToCard(which, pick){
       const h = activeHand();
       let newHand = [];
       let realSplit = false;
+      let movedCard = null;
       // If it's a real pair on exactly 2 cards, move one card to the new hand (real split feel)
       if(h.length === 2 && String(h[0].rank) === String(h[1].rank)){
-        newHand = [h.pop()];
+        movedCard = h.pop();
+        newHand = [movedCard];
         realSplit = true;
       }
       state.hands.push(newHand);
+      // bankroll: if round already started, new split hand needs an extra bet
+      if(bank.inRound){
+        if(!bankAddHandStake()){
+          // undo hand creation
+          state.hands.pop();
+          if(movedCard){ h.push(movedCard); movedCard = null; }
+          showToast("Nincs fedezet SPLIT-re");
+          renderAll();
+          return;
+        }
+      }
       // keep metadata in sync
       if(!Array.isArray(state.hmeta)) state.hmeta = [];
       // new hand meta: fromSplit only if it was a real split
@@ -1106,6 +1526,7 @@ function pickToCard(which, pick){
       if(h.length){
         return showToast("Előbb töröld az aktív kéz lapjait");
       }
+      bankRemoveHandStake(state.activeHand);
       state.hands.splice(state.activeHand, 1);
       if(Array.isArray(state.hmeta)) state.hmeta.splice(state.activeHand, 1);
       if(state.activeHand >= state.hands.length) state.activeHand = state.hands.length - 1;
@@ -1115,22 +1536,76 @@ function pickToCard(which, pick){
       showToast("Kéz törölve");
     });
 
+    // Per-hand action markers (local bankroll model)
+    const btnTD = $("btnToggleDouble");
+    if(btnTD){
+      btnTD.addEventListener("click", ()=>{
+        if(!canEditPlayer()) return showToast("Player locked");
+        bankToggleDouble(state.activeHand);
+        renderAll();
+        broadcastHostHands();
+      });
+    }
+    const btnTS = $("btnToggleSurrender");
+    if(btnTS){
+      btnTS.addEventListener("click", ()=>{
+        if(!canEditPlayer()) return showToast("Player locked");
+        bankToggleSurrender(state.activeHand);
+        renderAll();
+        broadcastHostHands();
+      });
+    }
+
     $("btnNewRound").addEventListener("click", ()=>{
   // Multiplayer: only Host can finalize a round (avoids race)
   if(state.mode === "multi" && state.role !== "host"){
     showToast("Csak a HOST indíthatja a következő kört");
     return;
   }
+
   const toMove = [...allPlayerCards(), ...state.dealer];
+
+  // If a bet is active, resolve bankroll first.
+  if(bank.inRound){
+    if(toMove.length === 0){
+      bankRefundAll();
+      showToast("Kör törölve (nincs lap)");
+    } else {
+      const res = resolvePayouts();
+      if(!res.ok){
+        showToast(res.msg || "Nem tudom lezárni a kört");
+        openModal("Nem zárható le", res.msg || "Adj meg több infot");
+        return;
+      }
+      const sign = res.net >= 0 ? "+" : "";
+      openModal(
+        "Kör összegzés",
+        "Net: " + sign + res.net.toLocaleString('hu-HU') + "\n" +
+        "Before: " + res.beforeTotal.toLocaleString('hu-HU') + "\n" +
+        "After: " + res.afterTotal.toLocaleString('hu-HU') + "\n\n" +
+        res.lines.join("\n")
+      );
+    }
+  }
+
   if(toMove.length === 0){
     showToast("Nincs mit menteni (adj meg lapokat)");
     return;
   }
-  state.seen.push(...toMove);
 
+  state.seen.push(...toMove);
   state.hands = [[]];
+  state.hmeta = [{ fromSplit: false }];
   state.activeHand = 0;
   state.dealer = [];
+
+  // After moving cards, round is over.
+  bank.inRound = false;
+  bank.baseBet = 0;
+  bank.stakes = [0];
+  bank.doubled = [false];
+  bank.surrendered = [false];
+  saveBank();
 
   persist();
   renderAll();
@@ -1222,6 +1697,95 @@ $("btnAuto").addEventListener("click", applyAuto);
       $("betRound").addEventListener("change", ()=>{
         betSettings.round = parseInt($("betRound").value,10) || 0;
         saveBetSettings();
+        renderAll();
+      });
+    }
+
+    // Bankroll UI (local-only)
+    const bankStartEl = $("bankStart");
+    const roundBetEl = $("roundBet");
+    const reserveModeEl = $("reserveMode");
+    const bankCapEl = $("bankCap");
+
+    // restore draft round bet
+    try{
+      const d = localStorage.getItem('bj_round_bet_draft');
+      if(roundBetEl && d) roundBetEl.value = String(clampMoney(d));
+    }catch(_e){}
+
+    if(bankStartEl) bankStartEl.value = String(bank.start ?? 0);
+    updateBankUI();
+
+    const btnBankSet = $("btnBankSet");
+    if(btnBankSet){
+      btnBankSet.addEventListener('click', ()=>{
+        const v = bankStartEl ? bankStartEl.value : 0;
+        bankSetStart(v);
+        renderAll();
+        showToast('Bankroll beállítva');
+      });
+    }
+
+    const btnBankReset = $("btnBankReset");
+    if(btnBankReset){
+      btnBankReset.addEventListener('click', ()=>{
+        bankSetStart(bank.start);
+        renderAll();
+        showToast('Bankroll reset');
+      });
+    }
+
+    const btnUseRecBet = $("btnUseRecBet");
+    if(btnUseRecBet){
+      btnUseRecBet.addEventListener('click', ()=>{
+        const r = compute();
+        if(roundBetEl) roundBetEl.value = String(clampMoney(r.bet||0));
+        try{ localStorage.setItem('bj_round_bet_draft', String(clampMoney(r.bet||0))); }catch(_e){}
+        showToast('Fogadás = ajánlott');
+      });
+    }
+
+    const btnStartRound = $("btnStartRound");
+    if(btnStartRound){
+      btnStartRound.addEventListener('click', ()=>{
+        const v = roundBetEl ? clampMoney(roundBetEl.value) : 0;
+        const bet = v>0 ? v : clampMoney(compute().bet||0);
+        if(roundBetEl) roundBetEl.value = String(bet);
+        try{ localStorage.setItem('bj_round_bet_draft', String(bet)); }catch(_e){}
+        bankStartRound(bet);
+        renderAll();
+      });
+    }
+
+    const btnCancelRound = $("btnCancelRound");
+    if(btnCancelRound){
+      btnCancelRound.addEventListener('click', ()=>{
+        bankRefundAll();
+        renderAll();
+        showToast('Kör törölve (refund)');
+      });
+    }
+
+    if(roundBetEl){
+      roundBetEl.addEventListener('input', ()=>{
+        try{ localStorage.setItem('bj_round_bet_draft', String(clampMoney(roundBetEl.value))); }catch(_e){}
+      });
+    }
+
+    if(reserveModeEl){
+      reserveModeEl.value = bankSettings.reserveMode || '4';
+      reserveModeEl.addEventListener('change', ()=>{
+        bankSettings.reserveMode = reserveModeEl.value;
+        saveBank();
+        renderAll();
+      });
+    }
+
+    if(bankCapEl){
+      bankCapEl.value = bankSettings.capToBankroll ? 'on' : 'off';
+      bankCapEl.addEventListener('change', ()=>{
+        bankSettings.capToBankroll = (bankCapEl.value === 'on');
+        saveBank();
         renderAll();
       });
     }
