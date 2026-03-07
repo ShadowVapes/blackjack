@@ -166,6 +166,11 @@ input:focus, select:focus{border-color:rgba(124,92,255,.55);box-shadow:0 0 0 3px
 .recTitle{font-weight:900;font-size:16px}
 .recDetail{font-size:12px;margin-top:6px;white-space:pre-line}
 
+
+/* Recommendation box moved near the table controls */
+.recTop{ margin: 10px 0 14px; }
+.recTop .rec{ margin: 0 0 10px; }
+.recTop .recBtns{ margin: 0 0 6px; }
 .seen{display:flex;gap:10px;flex-wrap:wrap;min-height:92px}
 
 .footer{padding:18px;text-align:center;color:var(--muted2);font-size:12px;margin-top:auto}

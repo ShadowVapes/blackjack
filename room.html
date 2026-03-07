@@ -103,6 +103,14 @@
                 </select>
               </div>
               <div class="field">
+                <label>Dealer 2. lap <span class="helpIcon" title="Ha BJ-nél a dealer nem kap 2. lapot (nincs hole card), állítsd BJ-nél elég 1-re. Így a kör lezárható 1 dealer lappal, ha minden hand már eldőlt (BJ / bust / surrender). A/10 upcardnál Peek OFF esetén továbbra is kérni fogja a 2. lapot (dealer BJ ellenőrzés).">i</span></label>
+                <select id="ruleDealerHoleReq">
+                  <option value="require" selected>Kell (2 lap)</option>
+                  <option value="bj-ok">BJ-nél elég 1</option>
+                </select>
+              </div>
+
+              <div class="field">
                 <label>Surrender <span class="helpIcon" title="Late surrender: ha engedett, a handet fél tétért feladod (R). Ha nincs, a táblázat szerinti hit/stand jön.">i</span></label>
                 <select id="ruleSurrender">
                   <option value="off">off</option>
@@ -165,6 +173,18 @@
             <button class="btn" id="btnNewRound">Következő kör</button>
             <button class="btn ghost" id="btnResetShoe">Cipő reset</button>
           </div>
+          <div class="recTop">
+            <div class="rec" id="recBox">
+              <div class="recTitle">—</div>
+              <div class="recDetail muted" id="recDetail">Adj meg lapokat…</div>
+            </div>
+
+            <div class="row recBtns">
+              <button class="btn" id="btnAuto">AUTO lépés</button>
+              <button class="btn ghost" id="btnExplain">Miért?</button>
+            </div>
+          </div>
+
         </div>
         <div class="grid3">
           <div class="mini">
@@ -359,18 +379,7 @@
             </details>
 
             </div>
-
-            <div class="rec" id="recBox">
-              <div class="recTitle">—</div>
-              <div class="recDetail muted" id="recDetail">Adj meg lapokat…</div>
-            </div>
-
-            <div class="row">
-              <button class="btn" id="btnAuto">AUTO lépés</button>
-              <button class="btn ghost" id="btnExplain">Miért?</button>
-            </div>
-
-            <details>
+<details>
               <summary><b>TC deviációk</b></summary>
               <ul class="muted small" id="devList"></ul>
             </details>

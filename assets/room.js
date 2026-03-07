@@ -71,7 +71,7 @@
         maxHands: 4,
         splitA: "one",
         resplitA: false,
-        peek: true },
+        peek: true, dealerHoleReq: "require"},
       hands: [[]],
       hmeta: [{ fromSplit: false }],
       activeHand: 0,
@@ -319,8 +319,41 @@
     if(!bank.inRound){
       return { ok:false, msg:'Nincs aktív kör (bet nincs lockolva).' };
     }
-    if(!state.dealer || state.dealer.length < 2){
-      return { ok:false, msg:'Adj meg a dealer lapjait (legalább 2), hogy lezárjuk a kört.' };
+    const holeReq = (state.rules && state.rules.dealerHoleReq) ? state.rules.dealerHoleReq : "require";
+    const allowOne = holeReq === "bj-ok";
+    if(!state.dealer || state.dealer.length < 1){
+      return { ok:false, msg:'Adj meg legalább a dealer upcardot, hogy lezárjuk a kört.' };
+    }
+    if(state.dealer.length < 2){
+      if(!allowOne){
+        return { ok:false, msg:'Adj meg a dealer lapjait (legalább 2), hogy lezárjuk a kört.' };
+      }
+      // Allow close with 1 dealer card only if ALL hands are already decided without dealer draw:
+      // blackjack (natural), bust, surrender, or no-bet.
+      const upRank = state.dealer[0] && state.dealer[0].rank;
+      const upIsA = upRank === "A";
+      const upIsTen = ["10","J","Q","K","T"].includes(upRank);
+      const bjPossible = upIsA || upIsTen;
+
+      // If dealer BJ is possible and Peek is OFF, we cannot be sure without the 2nd card.
+      if(bjPossible && !(state.rules && state.rules.peek)){
+        return { ok:false, msg:'Dealer upcard A/10 és Peek OFF: a dealer blackjack ellenőrzéshez add meg a 2. lapot is.' };
+      }
+
+      for(let i=0;i<state.hands.length;i++){
+        const hand = state.hands[i];
+        const meta = (state.hmeta && state.hmeta[i]) ? state.hmeta[i] : {fromSplit:false};
+        const stake = clampMoney(bank.stakes[i]||0);
+        if(stake<=0) continue;
+        const pObj0 = window.BJStrategy.handTotal(hand);
+        const pTotal0 = pObj0.total;
+        const pBJ0 = (!meta.fromSplit) && hand.length===2 && pTotal0===21;
+        const surrendered0 = !!bank.surrendered[i];
+        const bust0 = pTotal0 > 21;
+        if(!(surrendered0 || bust0 || pBJ0)){
+          return { ok:false, msg:'Dealernek csak 1 lapja van: ezt csak akkor tudom lezárni, ha minden hand már eldőlt (BJ / bust / surrender). Adj meg több dealer lapot vagy állítsd vissza a 2 lapos módot.' };
+        }
+      }
     }
 
     const dTotObj = window.BJStrategy.handTotal(state.dealer);
@@ -1374,6 +1407,7 @@ function pickToCard(which, pick){
     $("ruleSplitA").value = state.rules.splitA;
     if($("ruleResplitA")) $("ruleResplitA").value = state.rules.resplitA ? "on" : "off";
     if($("rulePeek")) $("rulePeek").value = state.rules.peek ? "on" : "off";
+    if($("ruleDealerHoleReq")) $("ruleDealerHoleReq").value = (state.rules.dealerHoleReq || "require");
 
     // bet UI (local)
     if($("betBase")) $("betBase").value = String(betSettings.base ?? 0);
@@ -1428,6 +1462,7 @@ function pickToCard(which, pick){
     state.rules.splitA = $("ruleSplitA").value;
     state.rules.resplitA = $("ruleResplitA") ? ($("ruleResplitA").value === "on") : !!state.rules.resplitA;
     state.rules.peek = $("rulePeek") ? ($("rulePeek").value === "on") : !!state.rules.peek;
+    state.rules.dealerHoleReq = $("ruleDealerHoleReq") ? $("ruleDealerHoleReq").value : (state.rules.dealerHoleReq || "require");
     persist();
     renderAll();
     if(state.mode === "multi" && rtReady){
@@ -1671,7 +1706,7 @@ $("btnAuto").addEventListener("click", applyAuto);
       openModal("Miért ez?", `${rec.title}\n\n${rec.detail}\n\nTC (aktuális döntéshez): ${tc.toFixed(2)}\nAjánlott tét (köv. kör): ${bet}  (${units}u) • shoe TC: ${tcShoe.toFixed(2)}\n\nMegjegyzés: basic strategy + TC deviációk.`);
     });
 
-    ["ruleDecks","ruleDealer17","ruleBjPay","rulePeek","ruleSurrender","ruleDouble","ruleDAS","ruleMaxHands","ruleSplitA","ruleResplitA"]
+    ["ruleDecks","ruleDealer17","ruleBjPay","rulePeek","ruleDealerHoleReq","ruleSurrender","ruleDouble","ruleDAS","ruleMaxHands","ruleSplitA","ruleResplitA"]
       .forEach(id => $(id).addEventListener("change", applyRulesFromUI));
 
     // Presets (BJA-style common rules)
