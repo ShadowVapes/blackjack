@@ -69,8 +69,11 @@
         doubleCustom: "",
         DAS: true,
         maxHands: 4,
-        splitA: "one" },
+        splitA: "one",
+        resplitA: false,
+        peek: true },
       hands: [[]],
+      hmeta: [{ fromSplit: false }],
       activeHand: 0,
       dealer: [],
       seen: [] };
@@ -405,6 +408,7 @@
       rules: state.rules,
       seen: state.seen,
       hands: state.hands,
+      hmeta: state.hmeta,
       activeHand: state.activeHand,
     };
     sbChannel.send({
@@ -589,6 +593,15 @@
 
   function ensureHands(){
     if(!Array.isArray(state.hands) || state.hands.length === 0) state.hands = [[]];
+    // hand metadata (fromSplit flags) so solver can respect BJ/surrender rules
+    if(!Array.isArray(state.hmeta) || state.hmeta.length !== state.hands.length){
+      const next = [];
+      for(let i=0;i<state.hands.length;i++){
+        const prev = (Array.isArray(state.hmeta) && state.hmeta[i]) ? state.hmeta[i] : null;
+        next.push({ fromSplit: !!(prev && prev.fromSplit) });
+      }
+      state.hmeta = next;
+    }
     if(typeof state.activeHand !== "number" || state.activeHand < 0) state.activeHand = 0;
     if(state.activeHand >= state.hands.length) state.activeHand = 0;
   }
@@ -720,7 +733,7 @@ function pickToCard(which, pick){
 }
 
   function broadcastHostHands(){
-    if(state.mode === "multi" && rtReady) rtBroadcast({ hands: state.hands, activeHand: state.activeHand }, "host");
+    if(state.mode === "multi" && rtReady) rtBroadcast({ hands: state.hands, hmeta: state.hmeta, activeHand: state.activeHand }, "host");
   }
 
   function addCardTo(listName, card){
@@ -844,7 +857,9 @@ function pickToCard(which, pick){
       doubleCustom: state.rules.doubleCustom || "",
       DAS: !!state.rules.DAS,
       maxHands: parseInt(state.rules.maxHands,10) || 4,
-      splitA: state.rules.splitA
+      splitA: state.rules.splitA,
+      resplitA: !!state.rules.resplitA,
+      peek: !!state.rules.peek
     };
 
     const baseRec = window.BJStrategy.recommend(activeHand(), state.dealer, rules, tc);
@@ -863,7 +878,7 @@ function pickToCard(which, pick){
         playerRanks: activeHand().map(c=>c.rank),
         dealerUpRank: state.dealer[0].rank,
         rules,
-        fromSplit: state.hands.length > 1,
+        fromSplit: !!(state.hmeta && state.hmeta[state.activeHand] && state.hmeta[state.activeHand].fromSplit),
         handsUsed: state.hands.length,
         nodeLimit: solverSettings.nodeLimit
       };
@@ -938,6 +953,8 @@ function pickToCard(which, pick){
     $("ruleDAS").value = state.rules.DAS ? "on" : "off";
     $("ruleMaxHands").value = String(state.rules.maxHands);
     $("ruleSplitA").value = state.rules.splitA;
+    if($("ruleResplitA")) $("ruleResplitA").value = state.rules.resplitA ? "on" : "off";
+    if($("rulePeek")) $("rulePeek").value = state.rules.peek ? "on" : "off";
 
     // bet UI (local)
     if($("betBase")) $("betBase").value = String(betSettings.base ?? 0);
@@ -963,6 +980,8 @@ function pickToCard(which, pick){
     state.rules.DAS = $("ruleDAS").value === "on";
     state.rules.maxHands = parseInt($("ruleMaxHands").value,10);
     state.rules.splitA = $("ruleSplitA").value;
+    state.rules.resplitA = $("ruleResplitA") ? ($("ruleResplitA").value === "on") : !!state.rules.resplitA;
+    state.rules.peek = $("rulePeek") ? ($("rulePeek").value === "on") : !!state.rules.peek;
     persist();
     renderAll();
     if(state.mode === "multi" && rtReady){
@@ -982,6 +1001,7 @@ function pickToCard(which, pick){
       v: state.v,
       rules: state.rules,
       hands: state.hands,
+      hmeta: state.hmeta,
       activeHand: state.activeHand,
       dealer: state.dealer,
       seen: state.seen
@@ -992,6 +1012,7 @@ function pickToCard(which, pick){
     const obj = JSON.parse(raw);
     if(obj.rules) state.rules = { ...state.rules, ...obj.rules };
     if(Array.isArray(obj.hands)) state.hands = obj.hands;
+    if(Array.isArray(obj.hmeta)) state.hmeta = obj.hmeta;
     else if(Array.isArray(obj.player)) state.hands = [obj.player]; // backward compat
     if(typeof obj.activeHand === "number") state.activeHand = obj.activeHand;
     if(Array.isArray(obj.dealer)) state.dealer = obj.dealer;
@@ -1051,18 +1072,28 @@ function pickToCard(which, pick){
       if(state.hands.length >= maxHands){
         return showToast(`Max hands elérve (${maxHands})`);
       }
+      const hIdx = state.activeHand;
       const h = activeHand();
       let newHand = [];
+      let realSplit = false;
       // If it's a real pair on exactly 2 cards, move one card to the new hand (real split feel)
       if(h.length === 2 && String(h[0].rank) === String(h[1].rank)){
         newHand = [h.pop()];
+        realSplit = true;
       }
       state.hands.push(newHand);
+      // keep metadata in sync
+      if(!Array.isArray(state.hmeta)) state.hmeta = [];
+      // new hand meta: fromSplit only if it was a real split
+      state.hmeta.push({ fromSplit: realSplit ? true : false });
+      // current hand becomes a split hand too if real split
+      if(realSplit && state.hmeta[hIdx]) state.hmeta[hIdx].fromSplit = true;
+
       state.activeHand = state.hands.length - 1;
       persist();
       renderAll();
       broadcastHostHands();
-      showToast("Új kéz létrehozva");
+      showToast(realSplit ? "Split: új kéz" : "Új kéz létrehozva");
     });
 
     $("btnRemoveHand").addEventListener("click", ()=>{
@@ -1076,6 +1107,7 @@ function pickToCard(which, pick){
         return showToast("Előbb töröld az aktív kéz lapjait");
       }
       state.hands.splice(state.activeHand, 1);
+      if(Array.isArray(state.hmeta)) state.hmeta.splice(state.activeHand, 1);
       if(state.activeHand >= state.hands.length) state.activeHand = state.hands.length - 1;
       persist();
       renderAll();
@@ -1105,7 +1137,7 @@ function pickToCard(which, pick){
 
   if(state.mode === "multi" && rtReady){
     rtBroadcast({ seen: state.seen }, "any");
-    rtBroadcast({ hands: state.hands, activeHand: state.activeHand }, "host");
+    rtBroadcast({ hands: state.hands, hmeta: state.hmeta, activeHand: state.activeHand }, "host");
     rtBroadcast({ dealer: state.dealer }, "dealer");
   }
   showToast("Következő kör ✓ (kör mentve a shoe-ba)");
@@ -1124,7 +1156,7 @@ $("btnAuto").addEventListener("click", applyAuto);
       openModal("Miért ez?", `${rec.title}\n\n${rec.detail}\n\nTC (aktuális döntéshez): ${tc.toFixed(2)}\nAjánlott tét (köv. kör): ${bet}  (${units}u) • shoe TC: ${tcShoe.toFixed(2)}\n\nMegjegyzés: basic strategy + TC deviációk.`);
     });
 
-    ["ruleDecks","ruleDealer17","ruleBjPay","ruleSurrender","ruleDouble","ruleDAS","ruleMaxHands","ruleSplitA"]
+    ["ruleDecks","ruleDealer17","ruleBjPay","rulePeek","ruleSurrender","ruleDouble","ruleDAS","ruleMaxHands","ruleSplitA","ruleResplitA"]
       .forEach(id => $(id).addEventListener("change", applyRulesFromUI));
 
     // Presets (BJA-style common rules)
@@ -1136,6 +1168,8 @@ $("btnAuto").addEventListener("click", applyAuto);
       if($("ruleDoubleCustom")) $("ruleDoubleCustom").value = "";
       $("ruleDAS").value = "on";
       $("ruleSplitA").value = "one";
+      if($("rulePeek")) $("rulePeek").value = "on";
+      if($("ruleResplitA")) $("ruleResplitA").value = "off";
       // leave decks as-is (user might be on 6 or 8), but if empty set to 6
       if(!$("ruleDecks").value) $("ruleDecks").value = "6";
       applyRulesFromUI();

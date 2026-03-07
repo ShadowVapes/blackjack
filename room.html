@@ -96,10 +96,18 @@
                 </select>
               </div>
               <div class="field">
+                <label>Dealer peek <span class="helpIcon" title="Peek = a dealer A/10 upcardnál belenéz, van-e blackjack. Ha van, azonnal vége; ha nincs, akkor a döntéseid már úgy számolhatók, hogy nincs dealer BJ.">i</span></label>
+                <select id="rulePeek">
+                  <option value="on" selected>on</option>
+                  <option value="off">off</option>
+                </select>
+              </div>
+              <div class="field">
                 <label>Surrender <span class="helpIcon" title="Late surrender: ha engedett, a handet fél tétért feladod (R). Ha nincs, a táblázat szerinti hit/stand jön.">i</span></label>
                 <select id="ruleSurrender">
                   <option value="off">off</option>
                   <option value="late" selected>late</option>
+                  <option value="early">early</option>
                 </select>
               </div>
               <div class="field">
@@ -135,6 +143,13 @@
                 <select id="ruleSplitA">
                   <option value="one" selected>1 lap / hand</option>
                   <option value="free">normál</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Resplit A <span class="helpIcon" title="Resplit A = ha A-A split után újra A jön, engedi-e újra splitelni.">i</span></label>
+                <select id="ruleResplitA">
+                  <option value="off" selected>off</option>
+                  <option value="on">on</option>
                 </select>
               </div>
             </div>

@@ -62,13 +62,37 @@ function decCount(c, idx){
   return copy;
 }
 
+
+function parseDoubleCustomSet(str){
+  const s = String(str||"").trim();
+  const set = new Set();
+  if(!s) return set;
+  // allow "9-11" ranges and "9,10,11" lists (spaces ok)
+  const parts = s.split(/\s*,\s*/).filter(Boolean);
+  for(const part of parts){
+    const m = part.match(/^\s*(\d+)\s*-\s*(\d+)\s*$/);
+    if(m){
+      let a = parseInt(m[1],10), b = parseInt(m[2],10);
+      if(Number.isFinite(a) && Number.isFinite(b)){
+        if(a>b){ const t=a; a=b; b=t; }
+        for(let x=a;x<=b;x++) set.add(x);
+      }
+      continue;
+    }
+    const n = parseInt(part,10);
+    if(Number.isFinite(n)) set.add(n);
+  }
+  return set;
+}
+
+// In "custom" mode, we treat an empty set as ANY (fallback).
 function canDoubleOnTotal(total, rules){
   const mode = rules.doubleRule || "any";
   if(mode === "any") return true;
   if(mode === "9-11") return total>=9 && total<=11;
   if(mode === "10-11") return total>=10 && total<=11;
   if(mode === "custom"){
-    const set = rules.doubleCustomSet;
+    const set = parseDoubleCustomSet(rules.doubleCustom || rules.doubleCustomStr || "");
     if(!set || set.size===0) return true;
     return set.has(total);
   }
@@ -131,12 +155,40 @@ function standEVExact(counts, pTotal, pIsNaturalBJ, dealerUpRank, rules, pBJElig
   const tot = totalCards(counts);
   if(tot <= 0) return -1;
 
+  // If dealer PEeks under A/10 and we are already making decisions (i.e. after peek),
+  // then dealer blackjack is ruled out and we condition on "no dealer BJ".
+  const isUpAce = (dealerUpRank === "A");
+  const isUpTen = TEN_RANKS.has(dealerUpRank);
+  const postPeek = !!rules.peek && (rules.surrender !== "early"); // early surrender is pre-peek
+  const conditionNoBJ = postPeek && (isUpAce || isUpTen) && !pIsNaturalBJ;
+
+  let denom = tot;
+  if(conditionNoBJ){
+    let bjCount = 0;
+    if(isUpAce){
+      // BJ if hole is any ten-value
+      for(let i=0;i<RANKS.length;i++){
+        if(counts[i] > 0 && TEN_RANKS.has(RANKS[i])) bjCount += counts[i];
+      }
+    } else if(isUpTen){
+      // BJ if hole is Ace
+      const aIdx = RANKS.indexOf("A");
+      bjCount = aIdx>=0 ? (counts[aIdx]||0) : 0;
+    }
+    denom = tot - bjCount;
+    if(denom <= 0){
+      // dealer always has blackjack in this configuration; if we are here (postPeek), the round wouldn't exist.
+      // return worst-case EV for non-BJ hand.
+      return -1;
+    }
+  }
+
   let ev = 0;
   // iterate over hole card
   for(let i=0;i<RANKS.length;i++){
     const n = counts[i];
     if(n<=0) continue;
-    const pHole = n / tot;
+    const pHole = n / denom;
     const c2 = decCount(counts, i);
     if(!c2) continue;
     const hole = RANKS[i];
@@ -147,6 +199,11 @@ function standEVExact(counts, pTotal, pIsNaturalBJ, dealerUpRank, rules, pBJElig
     [dTotal, dSoft] = addTo(dTotal, dSoft, hole);
 
     const dealerBJ = isBlackjack2(dealerUpRank, hole);
+
+    if(conditionNoBJ && dealerBJ){
+      // ruled out by peek
+      continue;
+    }
 
     if(pBJEligible && pIsNaturalBJ){
       // player has blackjack
@@ -188,7 +245,7 @@ function bestEVExact(counts, pTotal, pSoftAces, cardsCount, r1, r2, fromSplit, d
   bumpNode();
 
   // key
-  const k = "B|"+countsKey(counts)+"|"+pTotal+"|"+pSoftAces+"|"+cardsCount+"|"+(r1||"")+"|"+(r2||"")+"|"+(fromSplit?1:0)+"|"+dealerUpRank+"|"+rules.dealer17+"|"+rules.surrender+"|"+rules.doubleRule+"|"+(rules.doubleCustom||"")+"|"+(rules.DAS?1:0)+"|"+rules.maxHands+"|"+rules.splitA+"|"+handsUsed;
+  const k = "B|"+countsKey(counts)+"|"+pTotal+"|"+pSoftAces+"|"+cardsCount+"|"+(r1||"")+"|"+(r2||"")+"|"+(fromSplit?1:0)+"|"+dealerUpRank+"|"+rules.dealer17+"|"+rules.surrender+"|"+rules.doubleRule+"|"+(rules.doubleCustom||"")+"|"+(rules.DAS?1:0)+"|"+rules.maxHands+"|"+rules.splitA+"|"+(rules.resplitA?1:0)+"|"+(rules.peek?1:0)+"|"+handsUsed;
   const cached = memoBest.get(k);
   if(cached) return cached;
 
@@ -196,9 +253,10 @@ function bestEVExact(counts, pTotal, pSoftAces, cardsCount, r1, r2, fromSplit, d
   const actions = [];
 
   // determine availability
-  const canSurrender = (rules.surrender === "late") && !fromSplit && cardsCount === 2;
+  const canSurrender = ((rules.surrender === "late") || (rules.surrender === "early")) && !fromSplit && cardsCount === 2;
   const canDouble = (cardsCount === 2) && (fromSplit ? !!rules.DAS : true) && canDoubleOnTotal(pTotal, rules);
-  const canSplit = (cardsCount === 2) && (r1 && r2 && r1 === r2) && (handsUsed < rules.maxHands);
+  let canSplit = (cardsCount === 2) && (r1 && r2 && r1 === r2) && (handsUsed < rules.maxHands);
+  if(canSplit && r1 === "A" && fromSplit && rules.resplitA === false){ canSplit = false; }
 
   const pIsNaturalBJ = (cardsCount === 2) && !fromSplit && isBlackjack2(r1, r2);
   const pBJEligible = (cardsCount === 2) && !fromSplit;
@@ -262,43 +320,63 @@ function bestEVExact(counts, pTotal, pSoftAces, cardsCount, r1, r2, fromSplit, d
     actions.push("DOUBLE");
   }
 
-  // SPLIT (shoe-aware probabilities, with-replacement approximation for follow-up)
+  // SPLIT (without-replacement for initial split cards; follow-up solved with exact recursion on reduced shoe)
   if(canSplit){
-    const tot = totalCards(counts);
-    if(tot > 0){
-      // probabilities for a single draw, with replacement
-      const probs = [];
-      for(let i=0;i<RANKS.length;i++){
-        const n = counts[i];
-        if(n>0) probs.push([RANKS[i], n / tot]);
-      }
+    const tot0 = totalCards(counts);
+    if(tot0 > 0){
       const pairRank = r1;
       const splitAOne = (pairRank === "A") && (rules.splitA === "one");
-
-      function evHandAfterDraw(drawRank){
-        let t=0,s=0;
-        [t,s] = addTo(t,s,pairRank);
-        [t,s] = addTo(t,s,drawRank);
-        if(t>21) return -1;
-        if(splitAOne){
-          // stand immediately, no BJ payout
-          return standEVExact(counts, t, false, dealerUpRank, rules, false);
-        }
-        // after split, blackjack payout not allowed
-        const sub = bestEVExact(counts, t, s, 2, pairRank, drawRank, true, dealerUpRank, rules, Math.min(rules.maxHands, handsUsed+1));
-        return sub.evs[sub.best];
-      }
+      const nextHandsUsed = Math.min(rules.maxHands, handsUsed + 1);
 
       let evSplit = 0;
-      // Expectation of two independent hands draws
-      let evOne = 0;
-      for(const [dr,p] of probs){ evOne += p * evHandAfterDraw(dr); }
-      evSplit = 2 * evOne;
+      const { out: out1 } = probListFromCounts(counts);
+      for(const [i, p1] of out1){
+        const c1 = decCount(counts, i);
+        if(!c1) continue;
+        const dr1 = RANKS[i];
+
+        let t1=0, s1=0;
+        [t1, s1] = addTo(t1, s1, pairRank);
+        [t1, s1] = addTo(t1, s1, dr1);
+
+        const { out: out2 } = probListFromCounts(c1);
+        for(const [j, p2] of out2){
+          const c2 = decCount(c1, j);
+          if(!c2) continue;
+          const dr2 = RANKS[j];
+
+          let t2=0, s2=0;
+          [t2, s2] = addTo(t2, s2, pairRank);
+          [t2, s2] = addTo(t2, s2, dr2);
+
+          // Both initial draw cards are removed in c2.
+          // Note: exact coupling of future draws between hands is extremely expensive;
+          // we compute each hand's optimal EV on this reduced shoe and sum them (high-accuracy approx).
+          let evH1, evH2;
+
+          if(t1 > 21) evH1 = -1;
+          else if(splitAOne) evH1 = standEVExact(c2, t1, false, dealerUpRank, rules, false);
+          else {
+            const sub1 = bestEVExact(c2, t1, s1, 2, pairRank, dr1, true, dealerUpRank, rules, nextHandsUsed);
+            evH1 = sub1.evs[sub1.best];
+          }
+
+          if(t2 > 21) evH2 = -1;
+          else if(splitAOne) evH2 = standEVExact(c2, t2, false, dealerUpRank, rules, false);
+          else {
+            const sub2 = bestEVExact(c2, t2, s2, 2, pairRank, dr2, true, dealerUpRank, rules, nextHandsUsed);
+            evH2 = sub2.evs[sub2.best];
+          }
+
+          evSplit += p1 * p2 * (evH1 + evH2);
+        }
+      }
 
       evs.SPLIT = evSplit;
       actions.push("SPLIT");
     }
   }
+
 
   // Pick best EV
   let best = actions[0];
@@ -476,6 +554,12 @@ function solve(payload){
   // enrich rules
   rules.doubleCustomSet = parseDoubleCustomSet(rules.doubleCustom || "");
   rules.maxHands = Math.max(1, parseInt(rules.maxHands,10) || 4);
+  rules.peek = !!rules.peek;
+  rules.resplitA = !!rules.resplitA;
+  rules.surrender = String(rules.surrender || "off");
+  rules.dealer17 = (rules.dealer17 === "H17") ? "H17" : "S17";
+  rules.bjPay = (rules.bjPay === "6:5") ? "6:5" : "3:2";
+  rules.splitA = (rules.splitA === "free") ? "free" : "one";
 
   NODE_LIMIT = Math.max(20000, Math.min(600000, parseInt(payload.nodeLimit,10) || 120000));
   nodeCount = 0;
