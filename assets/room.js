@@ -103,6 +103,7 @@
     stakes: [0],
     doubled: [false],
     surrendered: [false],
+    betDraft: 0,
   };
 
   let bankSettings = {
@@ -129,6 +130,13 @@
         if(Array.isArray(o.doubled)) bank.doubled = o.doubled;
         if(Array.isArray(o.surrendered)) bank.surrendered = o.surrendered;
       }
+
+      // load round bet draft (separate localStorage) into bank.betDraft
+      try{
+        const d = localStorage.getItem('bj_round_bet_draft');
+        if(d !== null && d !== undefined) bank.betDraft = clampMoney(d);
+        if(bank.inRound && bank.baseBet) bank.betDraft = clampMoney(bank.baseBet);
+      }catch(_e){}
       const raw2 = localStorage.getItem('bj_bank_settings');
       if(raw2){
         const s = JSON.parse(raw2);
@@ -383,7 +391,7 @@
   // EV-solver (exact EV) settings - LOCAL ONLY (not synced)
   let solverSettings = {
     enabled: true,
-    nodeLimit: 400000
+    nodeLimit: 2000000
   };
 
   function loadSolverSettings(){
@@ -519,11 +527,12 @@
     if(v === undefined || v === null || !Number.isFinite(v)) return "—";
     return (v >= 0 ? "+" : "") + v.toFixed(4);
   }
-  function formatEVList(evs){
+  function formatEVList(evs, allowFn){
     const order = ["STAND","HIT","DOUBLE","SPLIT","SURRENDER"];
     const lines = [];
     for(const a of order){
       if(evs && Object.prototype.hasOwnProperty.call(evs, a)){
+        if(allowFn && !allowFn(a)) continue;
         lines.push(`${a}: ${fmtEV(evs[a])}`);
       }
     }
@@ -615,11 +624,12 @@
       let bet = roundDown(base * units, betSettings.round);
 
       if(bankSettings && bankSettings.capToBankroll){
-        const totBank = bankTotal();
+        const totBank = clampMoney(bank.balance);
         const factor = exposureFactor();
         const maxBet = roundDown(Math.floor(totBank / factor), betSettings.round);
         if(Number.isFinite(maxBet) && maxBet >= 0) bet = Math.min(bet, maxBet);
       }
+      bet = Math.min(clampMoney(bet), clampMoney(bank.balance));
       return clampMoney(bet);
     }catch(_e){
       return 0;
@@ -1160,7 +1170,7 @@ function pickToCard(which, pick){
     try{
       const capOn = !!bankSettings.capToBankroll;
       if(capOn){
-        const totBank = bankTotal();
+        const totBank = clampMoney(bank.balance);
         const factor = exposureFactor();
         const maxBet = roundDown(Math.floor(totBank / factor), betSettings.round);
         if(Number.isFinite(maxBet) && maxBet >= 0){
@@ -1173,6 +1183,9 @@ function pickToCard(which, pick){
         }
       }
     }catch(_e){}
+
+    // Never suggest a bet higher than currently available bankroll
+    try{ bet = Math.min(clampMoney(bet), clampMoney(bank.balance)); }catch(_e){}
 
     $("rcOut").textContent = String(rc);
     $("tcOut").textContent = tc.toFixed(2);
@@ -1243,44 +1256,59 @@ function pickToCard(which, pick){
 
       if(evRes && evRes.ok){
         const mode = evRes.exact ? "EXACT" : "APPROX";
-        const evLines = formatEVList(evRes.evs);
+        let evLines = formatEVList(evRes.evs);
         let bestAction = evRes.best;
         let bankrollNote = '';
 
-        // If bankroll is tracked and a bet is already on the table, filter out actions you cannot afford now.
+          // Bankroll-aware action filtering (ne ajánljon olyat, amit nem tudsz megfizetni)
         try{
-          if(bank.inRound){
-            const aIdx = state.activeHand;
-            const needDouble = clampMoney(bank.stakes[aIdx]||0);
-            const canAffordDouble = needDouble>0 && clampMoney(bank.balance) >= needDouble;
-            const canAffordSplit = (clampMoney(bank.balance) >= clampMoney(bank.baseBet||0)) && (state.hands.length < (parseInt(state.rules.maxHands,10)||4));
+          const aIdx = state.activeHand;
+          const maxHands = parseInt(state.rules.maxHands,10) || 4;
+          const avail = clampMoney(bank.balance);
 
-            const affordable = (a)=>{
-              if(a === 'DOUBLE') return canAffordDouble;
-              if(a === 'SPLIT') return canAffordSplit;
-              return true;
-            };
+          // effective bet for affordability:
+          // - if round started: actual stake on this hand / baseBet
+          // - else: draft bet (roundBet) or next-round recommended bet
+          const draftEl = $("roundBet");
+          const draftBet = draftEl ? clampMoney(draftEl.value) : 0;
+          const effBase = bank.inRound ? clampMoney(bank.baseBet||0) : (draftBet>0 ? draftBet : clampMoney(calcRecommendedBetNextRound()));
+          const effStake = bank.inRound ? clampMoney(bank.stakes[aIdx]||effBase) : effBase;
 
-            if(!affordable(bestAction) && evRes.evs){
-              // pick best affordable EV
-              let best = null;
-              let bestEv = -1e9;
-              for(const [act, ev] of Object.entries(evRes.evs)){
-                if(!affordable(act)) continue;
-                if(typeof ev !== 'number') continue;
-                if(ev > bestEv){ bestEv = ev; best = act; }
-              }
-              if(best){
-                bankrollNote = `
+          const canAffordDouble = (effStake>0) && (avail >= effStake);
+          const canAffordSplit  = (state.hands.length < maxHands) && (avail >= effBase);
 
-⚠ Bankroll limit: ${bestAction} nem fér bele most → ${best}`;
-                bestAction = best;
-              }
+          const affordable = (a)=>{
+            if(a === 'DOUBLE') return canAffordDouble;
+            if(a === 'SPLIT') return canAffordSplit;
+            return true;
+          };
+
+          // Filter EV display
+          const filteredLines = formatEVList(evRes.evs, affordable);
+          if(filteredLines) evLines = filteredLines;
+
+          // If solver best is not affordable, pick best affordable by EV
+          if(!affordable(bestAction) && evRes.evs){
+            let best = null;
+            let bestEv = -1e9;
+            for(const [act, ev] of Object.entries(evRes.evs)){
+              if(!affordable(act)) continue;
+              if(typeof ev !== 'number') continue;
+              if(ev > bestEv){ bestEv = ev; best = act; }
+            }
+            if(best){
+              bankrollNote = `\n\n⚠ Bankroll limit: ${bestAction} nem fér bele → ${best}`;
+              bestAction = best;
             }
           }
-        }catch(_e){}
 
-        rec.action = bestAction;
+          const excluded = [];
+          if(!canAffordDouble) excluded.push('DOUBLE');
+          if(!canAffordSplit) excluded.push('SPLIT');
+          if(excluded.length){
+            bankrollNote += `\n\n⚠ Nincs fedezet: ${excluded.join(', ')} (Avail: ${avail.toLocaleString('hu-HU')}, Bet: ${effBase.toLocaleString('hu-HU')})`;
+          }
+        }catch(_e){}        rec.action = bestAction;
         rec.title = `AJÁNLÁS: ${bestAction}`;
         rec.detail =
           `EV-solver: ${mode} • nodes: ${evRes.nodes||0}${evRes.note?` • ${evRes.note}`:""}\n` +
@@ -1356,7 +1384,19 @@ function pickToCard(which, pick){
     if($("betCustomWrap")) $("betCustomWrap").style.display = (betSettings.ramp === "custom") ? "block" : "none";
     // bankroll UI (local)
     if($("bankStart")) $("bankStart").value = String(bank.start ?? 0);
-    if($("roundBet")) $("roundBet").value = String(bank.inRound ? (bank.baseBet ?? 0) : (clampMoney($("roundBet").value) || 0));
+    const rb = $("roundBet");
+    if(rb){
+      rb.disabled = !!bank.inRound;
+      if(bank.inRound){
+        rb.value = String(clampMoney(bank.baseBet ?? 0));
+      } else {
+        // do not clobber while user is typing
+        if(document.activeElement !== rb){
+          const v = clampMoney((bank.betDraft ?? rb.value) || 0);
+          rb.value = v ? String(v) : "";
+        }
+      }
+    }
     if($("reserveMode")) $("reserveMode").value = bankSettings.reserveMode || '4';
     if($("bankCap")) $("bankCap").value = bankSettings.capToBankroll ? 'on' : 'off';
     updateBankUI();
@@ -1740,6 +1780,7 @@ $("btnAuto").addEventListener("click", applyAuto);
       btnUseRecBet.addEventListener('click', ()=>{
         const r = compute();
         if(roundBetEl) roundBetEl.value = String(clampMoney(r.bet||0));
+        bank.betDraft = clampMoney(r.bet||0);
         try{ localStorage.setItem('bj_round_bet_draft', String(clampMoney(r.bet||0))); }catch(_e){}
         showToast('Fogadás = ajánlott');
       });
@@ -1751,6 +1792,7 @@ $("btnAuto").addEventListener("click", applyAuto);
         const v = roundBetEl ? clampMoney(roundBetEl.value) : 0;
         const bet = v>0 ? v : clampMoney(compute().bet||0);
         if(roundBetEl) roundBetEl.value = String(bet);
+        bank.betDraft = bet;
         try{ localStorage.setItem('bj_round_bet_draft', String(bet)); }catch(_e){}
         bankStartRound(bet);
         renderAll();
@@ -1768,7 +1810,9 @@ $("btnAuto").addEventListener("click", applyAuto);
 
     if(roundBetEl){
       roundBetEl.addEventListener('input', ()=>{
-        try{ localStorage.setItem('bj_round_bet_draft', String(clampMoney(roundBetEl.value))); }catch(_e){}
+        const v = clampMoney(roundBetEl.value);
+        bank.betDraft = v;
+        try{ localStorage.setItem('bj_round_bet_draft', String(v)); }catch(_e){}
       });
     }
 
@@ -1800,6 +1844,20 @@ $("btnAuto").addEventListener("click", applyAuto);
         saveSolverSettings();
         // clear pending so it recalculates
         evPendingKey = null;
+        renderAll();
+      });
+    }
+
+
+    // Solver precision UI
+    const solverPrecision = $("solverPrecision");
+    if(solverPrecision){
+      solverPrecision.value = String(solverSettings.nodeLimit || 2000000);
+      solverPrecision.addEventListener("change", ()=>{
+        solverSettings.nodeLimit = parseInt(solverPrecision.value,10) || solverSettings.nodeLimit;
+        saveSolverSettings();
+        evPendingKey = null;
+        try{ evCache.clear(); }catch(_e){}
         renderAll();
       });
     }

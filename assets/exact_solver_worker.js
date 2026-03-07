@@ -111,7 +111,7 @@ function dealerShouldHit(total, softAces, rules){
 const memoDealer = new Map(); // key -> Map(total->prob) with 0 as bust
 const memoBest   = new Map(); // key -> {best, evs, nodes, exact:false/true}
 
-let NODE_LIMIT = 120000; // can be increased by UI
+let NODE_LIMIT = 2000000; // can be increased by UI (higher = more exact, slower)
 let nodeCount = 0;
 
 function bumpNode(){
@@ -561,7 +561,7 @@ function solve(payload){
   rules.bjPay = (rules.bjPay === "6:5") ? "6:5" : "3:2";
   rules.splitA = (rules.splitA === "free") ? "free" : "one";
 
-  NODE_LIMIT = Math.max(20000, Math.min(600000, parseInt(payload.nodeLimit,10) || 120000));
+  NODE_LIMIT = Math.max(50000, Math.min(20000000, parseInt(payload.nodeLimit,10) || 2000000));
   nodeCount = 0;
 
   try{
